@@ -1,0 +1,2 @@
+# TradeSim
+Crypto trading simulator 
