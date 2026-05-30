@@ -1,51 +1,57 @@
-# TradeSim — DIMO Paper-Trading Simulator
+# TradeSim — Coinbase Rotation Paper-Trading Simulator
 
-A native SwiftUI iPhone app that pulls **live DIMO prices** from Coinbase's
-public API, runs a configurable technical-analysis strategy, sends **trade
-alerts** as push notifications, and runs a **paper-trading simulation** so you
-can see how acting on those alerts would have grown a starting balance —
-without risking real money.
+A native SwiftUI iPhone app that scans the **entire Coinbase USD market** live,
+ranks coins by a predictive momentum/trend heuristic, and simulates **rotating
+your balance between coins** (starting from your DIMO) to chase a profit — with
+**trade alerts** pushed to your phone. No real money is ever touched.
 
 > ⚠️ **This is a simulator and an educational tool.** It executes **no real
-> trades** and connects to **no exchange account**. The signals are simple
-> technical indicators, *not* financial advice. Crypto is volatile and you can
-> lose money. Nothing here guarantees a profit.
+> trades** and connects to **no exchange account**. The "predicted edge" is a
+> momentum/trend/RSI **heuristic, not a forecast** or financial advice. Crypto
+> is volatile and you can lose money. Nothing here guarantees a profit.
 
 ---
 
 ## What it does
 
-- **Live data** — spot price + historical candles for `DIMO-USD` straight from
-  Coinbase's public (no-auth) endpoints.
-- **Signal engine** — a moving-average crossover gated by RSI:
-  - **BUY** when the fast SMA crosses above the slow SMA and RSI isn't overbought.
-  - **SELL** when the fast SMA crosses below the slow SMA, or RSI is overbought.
-  - **HOLD** otherwise.
-- **Trade alerts** — actionable signals fire a local push notification
-  (`BUY DIMO` / `SELL DIMO`) so you get pinged on your phone.
-- **Paper portfolio** — starts with your **$23.17** and (optionally) auto-applies
-  every alert, tracking cash, holdings, realized P/L and total return. You can
-  also tap **Buy/Sell** manually to simulate trades yourself.
-- **Chart** — price with both SMAs overlaid and your simulated trades marked.
-- **Tunable strategy** — change SMA periods, RSI period and thresholds, the
-  starting balance, and reset the simulation any time. Everything persists
-  between launches.
+- **Whole-market scan** — pulls every online `*-USD` Coinbase product (~hundreds
+  of coins) and their 24h stats in **one** request, plus candles for the top
+  candidates. Browse, search and sort the full market in the **Markets** tab.
+- **Predictive scoring** — for the strongest movers (and your current holding),
+  it computes a blended "edge" from recent momentum, SMA trend direction and RSI.
+  Clearly labeled as a heuristic screen, not a prediction.
+- **Rotation engine** — recommends **ENTER / ROTATE / EXIT / HOLD**, only acting
+  when a coin's edge beats your current holding by more than the realistic
+  **round-trip cost** (it routes every switch through USD and charges ~0.6% per
+  leg). The **Strategy** tab shows the ranked picks and the current call.
+- **Trade alerts** — each new actionable recommendation fires a local push
+  notification (`ROTATE DIMO → SOL`, `EXIT … → cash`, etc.).
+- **Multi-asset paper portfolio** — seeded with your **$23.17 of DIMO**, it holds
+  one coin (or cash) at a time, auto-rotating (toggleable) and tracking total
+  value, return, realized P/L and every trade. Tap any coin to buy/rotate
+  manually, or move to cash.
+- **Charts** — price with both SMAs and your simulated trades, on the dashboard
+  and on each coin's detail screen.
+- **Tunable** — entry/rotation/exit thresholds, candidate count, momentum window,
+  SMA/RSI parameters, timeframe and starting balance. Everything persists.
 
 ## Project layout
 
 ```
 TradeSim/
-├── TradeSimApp.swift           App entry, polling lifecycle, notification setup
-├── Models/                     Candle, Quote, alerts, trades, portfolio
+├── TradeSimApp.swift           App entry, scan lifecycle, notification setup
+├── Models/                     Candle, products, market stats, scores,
+│                               positions, trades, recommendations
 ├── Services/
-│   ├── MarketDataService.swift Coinbase spot + candles
-│   ├── SignalEngine.swift      SMA / RSI indicators + signal logic
-│   ├── Simulator.swift         Paper-trading engine (with ~0.6% fee model)
+│   ├── MarketDataService.swift Coinbase products, bulk stats, candles (fan-out)
+│   ├── SignalEngine.swift      SMA / RSI indicator math
+│   ├── Predictor.swift         Coin scoring + rotation recommendations
+│   ├── Simulator.swift         Multi-asset paper engine (~0.6% fee per leg)
 │   ├── NotificationManager.swift  Local push notifications
 │   └── PersistenceStore.swift  Saves state to UserDefaults
 ├── ViewModels/
-│   └── TradeSimModel.swift     Observable app state + polling loop
-└── Views/                      Dashboard, Chart, Alerts, Settings
+│   └── TradeSimModel.swift     Observable state + market-scan loop
+└── Views/                      Portfolio, Markets, Strategy, Activity, Settings
 ```
 
 The Xcode project uses a **file-system-synchronized group**, so any file you add
@@ -107,7 +113,12 @@ phone. This build lasts 7 days before you need to re-run from Xcode.
   backgrounded. For always-on alerts even when the app is closed, add
   `BGAppRefreshTask` (BackgroundTasks framework) — left out of v1 to keep the
   build dependency-free and reliable.
-- **Strategy:** SMA-crossover + RSI is a starting point. You could add MACD,
-  Bollinger Bands, or a trailing stop in `SignalEngine.swift`.
-- **Backtesting:** the `Simulator` is pure and side-effect-free, so it's easy to
-  run it across the full candle history to backtest before going live.
+- **Scoring:** the predictive edge (momentum × trend × RSI) lives in
+  `Predictor.swift` and is intentionally simple/transparent. Add MACD, Bollinger
+  Bands, volatility scaling or a real forecast model there.
+- **Backtesting:** `Simulator` and `Predictor` are pure and side-effect-free, so
+  you can replay them across historical candles to backtest the rotation
+  strategy before trusting it.
+- **Slippage/liquidity:** fees are modeled (~0.6%/leg) but slippage isn't. Thin
+  coins can cost more to trade than the simulation assumes — the candidate filter
+  uses a minimum 24h USD volume to mitigate this.

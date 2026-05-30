@@ -4,13 +4,16 @@ struct RootView: View {
     var body: some View {
         TabView {
             DashboardView()
-                .tabItem { Label("Dashboard", systemImage: "chart.bar.fill") }
+                .tabItem { Label("Portfolio", systemImage: "briefcase.fill") }
 
-            ChartView()
-                .tabItem { Label("Chart", systemImage: "chart.xyaxis.line") }
+            MarketsView()
+                .tabItem { Label("Markets", systemImage: "chart.bar.fill") }
 
-            AlertsView()
-                .tabItem { Label("Alerts", systemImage: "bell.fill") }
+            RotationView()
+                .tabItem { Label("Strategy", systemImage: "arrow.triangle.2.circlepath") }
+
+            ActivityView()
+                .tabItem { Label("Activity", systemImage: "bell.fill") }
 
             SettingsView()
                 .tabItem { Label("Settings", systemImage: "gearshape.fill") }

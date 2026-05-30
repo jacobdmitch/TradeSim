@@ -1,11 +1,11 @@
 import SwiftUI
 
-struct AlertsView: View {
+struct ActivityView: View {
     @Environment(TradeSimModel.self) private var model
-    @State private var scope: Scope = .alerts
+    @State private var scope: Scope = .recommendations
 
     enum Scope: String, CaseIterable, Identifiable {
-        case alerts = "Signals"
+        case recommendations = "Signals"
         case trades = "Trades"
         var id: String { rawValue }
     }
@@ -20,7 +20,7 @@ struct AlertsView: View {
                 .padding(.horizontal)
 
                 switch scope {
-                case .alerts: alertList
+                case .recommendations: recommendationList
                 case .trades: tradeList
                 }
             }
@@ -28,24 +28,26 @@ struct AlertsView: View {
         }
     }
 
-    private var alertList: some View {
+    private var recommendationList: some View {
         Group {
-            if model.alerts.isEmpty {
+            if model.recommendations.isEmpty {
                 ContentUnavailableView("No signals yet", systemImage: "bell.slash")
             } else {
-                List(model.alerts) { alert in
+                List(model.recommendations) { rec in
                     HStack(spacing: 12) {
-                        Image(systemName: alert.action.systemImage)
-                            .foregroundStyle(alert.action.color)
-                            .font(.title2)
+                        Image(systemName: rec.action.systemImage)
+                            .foregroundStyle(rec.action.color).font(.title2)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(alert.action.rawValue).font(.headline)
-                            Text(alert.reason).font(.caption).foregroundStyle(.secondary)
-                            Text(Format.time(alert.timestamp))
-                                .font(.caption2).foregroundStyle(.tertiary)
+                            Text(title(rec)).font(.headline)
+                            Text(rec.rationale).font(.caption).foregroundStyle(.secondary)
+                            Text(Format.time(rec.timestamp)).font(.caption2).foregroundStyle(.tertiary)
                         }
                         Spacer()
-                        Text(Format.price(alert.price)).font(.subheadline.monospacedDigit())
+                        if rec.action != .hold {
+                            Text(Format.pct(rec.edgePct))
+                                .font(.subheadline.monospacedDigit())
+                                .foregroundStyle(rec.action.color)
+                        }
                     }
                 }
                 .listStyle(.plain)
@@ -61,15 +63,13 @@ struct AlertsView: View {
                 List(model.trades) { trade in
                     HStack(spacing: 12) {
                         Image(systemName: trade.action.systemImage)
-                            .foregroundStyle(trade.action.color)
-                            .font(.title2)
+                            .foregroundStyle(trade.action.color).font(.title2)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("\(trade.action.rawValue) \(Format.tokens(trade.quantity)) \(model.symbol)")
+                            Text("\(trade.action.rawValue) \(Format.tokens(trade.quantity)) \(trade.base)")
                                 .font(.headline)
                             Text("@ \(Format.price(trade.price))")
                                 .font(.caption).foregroundStyle(.secondary)
-                            Text(Format.time(trade.timestamp))
-                                .font(.caption2).foregroundStyle(.tertiary)
+                            Text(Format.time(trade.timestamp)).font(.caption2).foregroundStyle(.tertiary)
                         }
                         Spacer()
                         if let pnl = trade.realizedPnL {
@@ -83,8 +83,17 @@ struct AlertsView: View {
             }
         }
     }
+
+    private func title(_ rec: RotationRecommendation) -> String {
+        switch rec.action {
+        case .enter:  return "Enter \(rec.toBase ?? "")"
+        case .rotate: return "Rotate \(rec.fromBase ?? "") → \(rec.toBase ?? "")"
+        case .exit:   return "Exit \(rec.fromBase ?? "") to cash"
+        case .hold:   return "Hold"
+        }
+    }
 }
 
 #Preview {
-    AlertsView().environment(TradeSimModel())
+    ActivityView().environment(TradeSimModel())
 }

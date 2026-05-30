@@ -1,95 +1,64 @@
 import SwiftUI
 import Charts
 
-struct ChartView: View {
-    @Environment(TradeSimModel.self) private var model
+/// Reusable line chart of closing prices with two SMA overlays and optional
+/// trade markers. Used on the dashboard and in the coin detail screen.
+struct PriceChartView: View {
+    let candles: [Candle]
+    var shortPeriod: Int = 9
+    var longPeriod: Int = 21
+    var trades: [SimulatedTrade] = []
+    var height: CGFloat = 260
 
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 16) {
-                granularityPicker
-
-                if model.candles.isEmpty {
-                    ContentUnavailableView(
-                        "No data yet",
-                        systemImage: "chart.xyaxis.line",
-                        description: Text("Pull to refresh on the Dashboard.")
-                    )
-                    .frame(maxHeight: .infinity)
-                } else {
-                    priceChart
-                    legend
-                    Spacer()
-                }
-            }
-            .padding()
-            .navigationTitle("\(model.symbol) Chart")
+        if candles.isEmpty {
+            ContentUnavailableView("No chart data", systemImage: "chart.xyaxis.line")
+                .frame(height: height)
+        } else {
+            chart.frame(height: height)
+            legend
         }
     }
 
-    private var granularityPicker: some View {
-        Picker("Granularity", selection: Binding(
-            get: { model.granularity },
-            set: { model.granularity = $0; Task { await model.refresh() } }
-        )) {
-            ForEach(Granularity.allCases) { g in
-                Text(g.label).tag(g)
-            }
-        }
-        .pickerStyle(.segmented)
-    }
-
-    private var priceChart: some View {
-        let closes = model.candles.map(\.close)
-        let shortSMA = movingAverage(closes, period: model.strategy.shortSMA)
-        let longSMA = movingAverage(closes, period: model.strategy.longSMA)
+    private var chart: some View {
+        let closes = candles.map(\.close)
+        let shortSMA = Self.movingAverage(closes, period: shortPeriod)
+        let longSMA = Self.movingAverage(closes, period: longPeriod)
 
         return Chart {
-            ForEach(model.candles) { candle in
-                LineMark(
-                    x: .value("Time", candle.time),
-                    y: .value("Price", candle.close),
-                    series: .value("Series", "Price")
-                )
+            ForEach(candles) { candle in
+                LineMark(x: .value("Time", candle.time),
+                         y: .value("Price", candle.close),
+                         series: .value("Series", "Price"))
                 .foregroundStyle(.blue)
             }
-            ForEach(Array(model.candles.enumerated()), id: \.offset) { idx, candle in
+            ForEach(Array(candles.enumerated()), id: \.offset) { idx, candle in
                 if let v = shortSMA[idx] {
-                    LineMark(
-                        x: .value("Time", candle.time),
-                        y: .value("Price", v),
-                        series: .value("Series", "Fast SMA")
-                    )
+                    LineMark(x: .value("Time", candle.time), y: .value("Price", v),
+                             series: .value("Series", "Fast SMA"))
                     .foregroundStyle(.green)
                 }
                 if let v = longSMA[idx] {
-                    LineMark(
-                        x: .value("Time", candle.time),
-                        y: .value("Price", v),
-                        series: .value("Series", "Slow SMA")
-                    )
+                    LineMark(x: .value("Time", candle.time), y: .value("Price", v),
+                             series: .value("Series", "Slow SMA"))
                     .foregroundStyle(.orange)
                 }
             }
-            // Mark simulated trades on the chart.
-            ForEach(model.trades) { trade in
-                PointMark(
-                    x: .value("Time", trade.timestamp),
-                    y: .value("Price", trade.price)
-                )
+            ForEach(trades) { trade in
+                PointMark(x: .value("Time", trade.timestamp),
+                          y: .value("Price", trade.price))
                 .foregroundStyle(trade.action.color)
-                .symbolSize(80)
+                .symbolSize(70)
             }
         }
         .chartYScale(domain: .automatic(includesZero: false))
-        .frame(height: 320)
     }
 
     private var legend: some View {
         HStack(spacing: 16) {
             legendItem(.blue, "Price")
-            legendItem(.green, "SMA \(model.strategy.shortSMA)")
-            legendItem(.orange, "SMA \(model.strategy.longSMA)")
+            legendItem(.green, "SMA \(shortPeriod)")
+            legendItem(.orange, "SMA \(longPeriod)")
         }
         .font(.caption)
     }
@@ -101,9 +70,8 @@ struct ChartView: View {
         }
     }
 
-    /// Returns an array aligned to `values`, with the SMA at each index (nil
-    /// until enough history exists).
-    private func movingAverage(_ values: [Double], period: Int) -> [Double?] {
+    /// SMA aligned to `values` (nil until enough history exists).
+    static func movingAverage(_ values: [Double], period: Int) -> [Double?] {
         guard period > 0 else { return Array(repeating: nil, count: values.count) }
         var result = [Double?](repeating: nil, count: values.count)
         guard values.count >= period else { return result }
@@ -115,8 +83,4 @@ struct ChartView: View {
         }
         return result
     }
-}
-
-#Preview {
-    ChartView().environment(TradeSimModel())
 }

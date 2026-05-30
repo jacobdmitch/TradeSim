@@ -4,15 +4,15 @@ import Foundation
 struct PersistenceStore {
     struct State: Codable {
         var startingBalance: Double
-        var portfolio: PortfolioSnapshot
-        var costBasis: Double
+        var portfolio: Portfolio
+        var seeded: Bool
         var trades: [SimulatedTrade]
-        var alerts: [TradeAlert]
+        var recommendations: [RotationRecommendation]
         var strategy: StrategyConfig
-        var autoTrade: Bool
+        var rotation: RotationConfig
     }
 
-    private let key = "tradesim.state.v1"
+    private let key = "tradesim.state.v2"
     private let defaults = UserDefaults.standard
 
     init() {}

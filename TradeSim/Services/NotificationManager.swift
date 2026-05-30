@@ -1,8 +1,8 @@
 import Foundation
 import UserNotifications
 
-/// Wraps local notifications so the app can push a trade alert to the lock
-/// screen / banner when a BUY or SELL signal fires.
+/// Wraps local notifications so the app can push a rotation alert to the lock
+/// screen / banner when the engine recommends acting.
 @MainActor
 final class NotificationManager {
     static let shared = NotificationManager()
@@ -20,20 +20,21 @@ final class NotificationManager {
         }
     }
 
-    /// Posts a notification for an actionable alert. HOLD alerts are ignored.
-    func notify(for alert: TradeAlert, symbol: String) {
-        guard alert.action != .hold else { return }
+    /// Posts a notification for an actionable rotation recommendation.
+    func notify(for rec: RotationRecommendation) {
+        guard rec.action != .hold else { return }
 
         let content = UNMutableNotificationContent()
-        content.title = "\(alert.action.rawValue) \(symbol)"
-        content.body = String(format: "Price $%.5f — %@", alert.price, alert.reason)
+        switch rec.action {
+        case .enter:  content.title = "ENTER \(rec.toBase ?? "")"
+        case .rotate: content.title = "ROTATE \(rec.fromBase ?? "") → \(rec.toBase ?? "")"
+        case .exit:   content.title = "EXIT \(rec.fromBase ?? "") → cash"
+        case .hold:   return
+        }
+        content.body = rec.rationale
         content.sound = .default
 
-        let request = UNNotificationRequest(
-            identifier: alert.id.uuidString,
-            content: content,
-            trigger: nil // deliver immediately
-        )
+        let request = UNNotificationRequest(identifier: rec.id.uuidString, content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request)
     }
 }

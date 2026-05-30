@@ -9,26 +9,40 @@ struct SettingsView: View {
         @Bindable var model = model
         NavigationStack {
             Form {
-                Section("Strategy") {
+                Section("Rotation strategy") {
+                    Toggle("Auto-rotate in simulation", isOn: $model.rotation.autoRotate)
+                    Stepper("Candidates analyzed: \(model.rotation.candidateCount)",
+                            value: $model.rotation.candidateCount, in: 4...30)
+                    Stepper("Momentum window: \(model.rotation.momentumLookback) bars",
+                            value: $model.rotation.momentumLookback, in: 2...24)
+                    sliderRow("Entry threshold", value: $model.rotation.enterThresholdPct,
+                              range: 0...5, suffix: "%")
+                    sliderRow("Rotation threshold", value: $model.rotation.rotationThresholdPct,
+                              range: 0...8, suffix: "%")
+                    sliderRow("Exit threshold", value: $model.rotation.exitThresholdPct,
+                              range: -8...0, suffix: "%")
+                }
+
+                Section("Indicators") {
                     Stepper("Fast SMA: \(model.strategy.shortSMA)",
                             value: $model.strategy.shortSMA, in: 2...50)
                     Stepper("Slow SMA: \(model.strategy.longSMA)",
                             value: $model.strategy.longSMA, in: 5...200)
                     Stepper("RSI period: \(model.strategy.rsiPeriod)",
                             value: $model.strategy.rsiPeriod, in: 2...50)
-                    VStack(alignment: .leading) {
-                        Text("RSI overbought: \(Int(model.strategy.rsiOverbought))")
-                        Slider(value: $model.strategy.rsiOverbought, in: 55...90, step: 1)
-                    }
-                    VStack(alignment: .leading) {
-                        Text("RSI oversold: \(Int(model.strategy.rsiOversold))")
-                        Slider(value: $model.strategy.rsiOversold, in: 10...45, step: 1)
+                    sliderRow("RSI overbought", value: $model.strategy.rsiOverbought,
+                              range: 55...90, suffix: "", step: 1)
+                    sliderRow("RSI oversold", value: $model.strategy.rsiOversold,
+                              range: 10...45, suffix: "", step: 1)
+                }
+
+                Section("Chart timeframe") {
+                    Picker("Granularity", selection: $model.granularity) {
+                        ForEach(Granularity.allCases) { Text($0.label).tag($0) }
                     }
                 }
 
                 Section("Simulation") {
-                    Toggle("Auto-apply alerts to paper portfolio",
-                           isOn: $model.autoTradeSimulation)
                     HStack {
                         Text("Starting balance")
                         Spacer()
@@ -37,35 +51,39 @@ struct SettingsView: View {
                             .multilineTextAlignment(.trailing)
                             .frame(width: 100)
                     }
-                    Button("Reset simulation", role: .destructive) {
-                        showResetConfirm = true
-                    }
+                    Button("Reset simulation", role: .destructive) { showResetConfirm = true }
                 }
 
                 Section("Data") {
-                    LabeledContent("Symbol", value: model.symbol)
-                    LabeledContent("Product", value: model.productID)
-                    LabeledContent("Refresh", value: "\(Int(model.refreshInterval))s")
+                    LabeledContent("Seed holding", value: model.seedBase)
+                    LabeledContent("Universe", value: "\(model.stats.count) USD markets")
+                    LabeledContent("Rescan", value: "\(Int(model.refreshInterval))s")
                     LabeledContent("Source", value: "Coinbase (public)")
                 }
 
                 Section {
-                    Text("This is a paper-trading simulator for education. It pulls live prices but executes no real trades. Technical signals are not financial advice; crypto can lose value rapidly.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                    Text("Paper-trading simulator for education. It pulls live market data but executes no real trades and connects to no account. \"Predicted edge\" is a momentum/trend/RSI heuristic, not a forecast or financial advice. Crypto can lose value rapidly.")
+                        .font(.footnote).foregroundStyle(.secondary)
                 }
             }
             .navigationTitle("Settings")
-            .confirmationDialog("Reset the simulation?",
-                                isPresented: $showResetConfirm,
+            .confirmationDialog("Reset the simulation?", isPresented: $showResetConfirm,
                                 titleVisibility: .visible) {
                 Button("Reset to \(resetBalance)", role: .destructive) {
                     if let bal = Double(resetBalance) { model.resetSimulation(to: bal) }
                 }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("This clears all simulated trades and starts over.")
+                Text("Clears all simulated trades and restarts from a \(model.seedBase) holding.")
             }
+        }
+    }
+
+    private func sliderRow(_ title: String, value: Binding<Double>,
+                           range: ClosedRange<Double>, suffix: String, step: Double = 0.5) -> some View {
+        VStack(alignment: .leading) {
+            Text("\(title): \(String(format: "%.1f", value.wrappedValue))\(suffix)")
+            Slider(value: value, in: range, step: step)
         }
     }
 }
