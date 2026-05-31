@@ -295,14 +295,16 @@ def _render(st: Settings, pf: Portfolio, rec, recs, trades, last_scan, realized,
         rec_html = "<p class='muted'>No recommendation yet.</p>"
 
     trade_rows = "".join(
-        f"<tr><td>{_ago(t.ts)}</td><td class='{ 'buy' if t.action=='BUY' else 'sell'}'>{t.action}</td>"
-        f"<td>{_esc(t.base)}</td><td>{t.quantity:.6f}</td><td>${t.price:,.6f}</td>"
-        f"<td>${t.cash_flow:,.2f}</td>"
-        f"<td class='muted'>${(getattr(t, 'fee_usd', 0.0) or 0.0):.2f}</td>"
-        f"<td>{('$%+.2f' % t.realized_pnl) if t.realized_pnl is not None else '—'}</td>"
-        f"<td><span class='badge {'live' if t.mode=='LIVE' else 'dry'}'>{t.mode}</span></td></tr>"
+        f"<tr><td data-label='When'>{_ago(t.ts)}</td>"
+        f"<td data-label='Side' class='{ 'buy' if t.action=='BUY' else 'sell'}'>{t.action}</td>"
+        f"<td data-label='Coin'>{_esc(t.base)}</td><td data-label='Qty'>{t.quantity:.6f}</td>"
+        f"<td data-label='Price'>${t.price:,.6f}</td>"
+        f"<td data-label='Cash flow'>${t.cash_flow:,.2f}</td>"
+        f"<td data-label='Fee' class='muted'>${(getattr(t, 'fee_usd', 0.0) or 0.0):.2f}</td>"
+        f"<td data-label='P&amp;L'>{('$%+.2f' % t.realized_pnl) if t.realized_pnl is not None else '—'}</td>"
+        f"<td data-label='Mode'><span class='badge {'live' if t.mode=='LIVE' else 'dry'}'>{t.mode}</span></td></tr>"
         for t in trades
-    ) or "<tr><td colspan='9' class='muted'>No trades yet.</td></tr>"
+    ) or "<tr><td colspan='9' class='muted empty'>No trades yet.</td></tr>"
 
     rec_rows = "".join(
         f"<li><b>{r.action}</b> {_esc(r.rationale)} <span class='muted'>({_ago(r.ts)})</span></li>"
@@ -491,17 +493,23 @@ _PAGE = """<!doctype html>
   @media (max-width:640px){
     .charts{ grid-template-columns:1fr } .grid{ grid-template-columns:1fr }
     h1{ font-size:21px } .cbox{ height:200px }
-    /* Trades fit the screen width: smaller type and cells wrap to a second
-       line instead of scrolling sideways. */
-    th,td{ padding:7px 5px; font-size:11px; }
     .tradespanel{ padding:12px; }
-    /* On phones only: bound to ~10 rows and scroll vertically (sticky header).
-       The panel keeps non-scrolling side gutters so swiping the edges scrolls
-       the whole page rather than the inner table. */
+    /* Bound to ~10 rows and scroll vertically; the panel's non-scrolling side
+       padding lets you swipe the edges to scroll the whole page. */
     .tscroll{ max-height:24rem; overflow-y:auto; overflow-x:hidden;
       -webkit-overflow-scrolling:touch; }
-    .tscroll thead th{ position:sticky; top:0; background:var(--panel2);
-      box-shadow:inset 0 -1px 0 var(--line); z-index:2; }
+    /* Reflow each trade into a labelled card: When/Side/Coin/Qty/Price on the
+       top line, the remaining columns (Cash flow/Fee/P&L/Mode) underneath. */
+    .tscroll table, .tscroll tbody, .tscroll td{ display:block; }
+    .tscroll thead{ display:none; }
+    .tscroll tr{ display:grid; grid-template-columns:repeat(5,1fr); gap:7px 8px;
+      padding:11px 2px; border-bottom:1px solid var(--line); }
+    .tscroll td{ border:0; padding:0; font-size:12px; }
+    .tscroll td::before{ content:attr(data-label); display:block;
+      font-size:9px; font-weight:700; text-transform:uppercase; letter-spacing:.04em;
+      color:var(--muted); margin-bottom:1px; }
+    .tscroll td.empty{ grid-column:1/-1; }
+    .tscroll td.empty::before{ content:none; }
     /* Controls become full-width, comfortably tappable rows. */
     .controls{ gap:8px; }
     .controls form.inline, .controls button{ width:100%; }
