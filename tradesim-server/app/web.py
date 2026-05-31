@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from . import config
 from .db import (
     AuditLog, EquitySnapshot, Portfolio, Recommendation, ScanLog, Settings, Trade,
-    SessionLocal, get_portfolio, get_settings, init_db,
+    SessionLocal, get_portfolio, get_settings, init_db, reset_for_mode_switch,
 )
 from .engine import run_once
 
@@ -57,6 +57,12 @@ def _authorized(token: Optional[str]) -> bool:
     return token == config.DASHBOARD_TOKEN
 
 
+def _since(query, col, since):
+    """Limit a history query to the current run (rows at/after the last mode
+    switch). No-op for a DB that has never switched modes."""
+    return query.filter(col >= since) if since else query
+
+
 @app.get("/healthz")
 def healthz():
     return {"ok": True, "ts": datetime.now(timezone.utc).isoformat()}
@@ -67,9 +73,10 @@ def api_state():
     with SessionLocal() as s:
         st = get_settings(s)
         pf = get_portfolio(s)
-        rec = s.query(Recommendation).order_by(Recommendation.id.desc()).first()
-        trades = s.query(Trade).order_by(Trade.id.desc()).limit(50).all()
-        realized = sum(t.realized_pnl or 0.0 for t in s.query(Trade).all())
+        since = st.history_since
+        rec = _since(s.query(Recommendation), Recommendation.ts, since).order_by(Recommendation.id.desc()).first()
+        trades = _since(s.query(Trade), Trade.ts, since).order_by(Trade.id.desc()).limit(50).all()
+        realized = sum(t.realized_pnl or 0.0 for t in _since(s.query(Trade), Trade.ts, since).all())
         return JSONResponse({
             "enabled": st.enabled,
             "dry_run": st.dry_run,
@@ -118,11 +125,13 @@ def toggle_dry_run(token: Optional[str] = Form(default=None), confirm: Optional[
         return RedirectResponse("/?err=auth", status_code=303)
     with SessionLocal() as s:
         st = get_settings(s)
+        going_live = st.dry_run  # currently dry-run -> about to switch to LIVE
         # Going dry-run -> LIVE is the dangerous direction: require typing LIVE.
-        if st.dry_run:
-            if (confirm or "").strip().upper() != "LIVE":
-                return RedirectResponse("/?err=confirm", status_code=303)
+        if going_live and (confirm or "").strip().upper() != "LIVE":
+            return RedirectResponse("/?err=confirm", status_code=303)
         st.dry_run = not st.dry_run
+        # Re-baseline + archive the prior run so each mode starts fresh.
+        reset_for_mode_switch(s, to_live=going_live)
         s.commit()
     return RedirectResponse("/", status_code=303)
 
@@ -155,18 +164,20 @@ def dashboard(request: Request):
     with SessionLocal() as s:
         st = get_settings(s)
         pf = get_portfolio(s)
-        rec = s.query(Recommendation).order_by(Recommendation.id.desc()).first()
-        recs = s.query(Recommendation).order_by(Recommendation.id.desc()).limit(10).all()
-        trades = s.query(Trade).order_by(Trade.id.desc()).limit(25).all()
-        last_scan = s.query(ScanLog).order_by(ScanLog.id.desc()).first()
-        all_trades = s.query(Trade).all()
+        since = st.history_since  # only show the current run's history
+        rec = _since(s.query(Recommendation), Recommendation.ts, since).order_by(Recommendation.id.desc()).first()
+        recs = _since(s.query(Recommendation), Recommendation.ts, since).order_by(Recommendation.id.desc()).limit(10).all()
+        trades = _since(s.query(Trade), Trade.ts, since).order_by(Trade.id.desc()).limit(25).all()
+        last_scan = _since(s.query(ScanLog), ScanLog.ts, since).order_by(ScanLog.id.desc()).first()
+        all_trades = _since(s.query(Trade), Trade.ts, since).all()
         realized = sum(t.realized_pnl or 0.0 for t in all_trades)
         fees_total = sum(getattr(t, "fee_usd", 0.0) or 0.0 for t in all_trades)
         equity = (
-            s.query(EquitySnapshot).order_by(EquitySnapshot.id.desc()).limit(300).all()
+            _since(s.query(EquitySnapshot), EquitySnapshot.ts, since)
+            .order_by(EquitySnapshot.id.desc()).limit(300).all()
         )
         equity = list(reversed(equity))  # oldest-first for the chart
-        audits = s.query(AuditLog).order_by(AuditLog.id.desc()).limit(8).all()
+        audits = _since(s.query(AuditLog), AuditLog.ts, since).order_by(AuditLog.id.desc()).limit(8).all()
         err = request.query_params.get("err")
         return HTMLResponse(
             _render(st, pf, rec, recs, trades, last_scan, realized, fees_total, equity, audits, err)

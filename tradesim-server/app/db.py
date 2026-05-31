@@ -49,6 +49,9 @@ class Settings(Base):
     interval_minutes: Mapped[int] = mapped_column(Integer, default=15)   # effective cadence
     prev_rec_sig: Mapped[Optional[str]] = mapped_column(String(96), nullable=True)  # 2-scan confirm
     min_hold_hours: Mapped[int] = mapped_column(Integer, default=6)      # min hold before rotating
+    # Dashboard only shows history (trades/recs/equity/scans/audits) at or after
+    # this time; advanced on each deliberate DRY-RUN<->LIVE switch to start fresh.
+    history_since: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
 
 
@@ -149,6 +152,7 @@ def _run_migrations() -> None:
             ("interval_minutes", "INTEGER DEFAULT 15"),
             ("prev_rec_sig", "VARCHAR(96)"),
             ("min_hold_hours", "INTEGER DEFAULT 6"),
+            ("history_since", "TIMESTAMP"),
         ],
         "portfolio": [
             ("pos_opened_at", "TIMESTAMP"),
@@ -198,3 +202,30 @@ def get_settings(session) -> Settings:
 
 def get_portfolio(session) -> Portfolio:
     return session.get(Portfolio, 1)
+
+
+def reset_for_mode_switch(session, *, to_live: bool) -> None:
+    """Re-baseline the account when the operator deliberately switches between
+    DRY-RUN and LIVE, and hide the prior run's history from the dashboard.
+
+    - Going LIVE: drop the modeled seed so the next live cycle adopts the real
+      Coinbase balances and holdings fresh (return baseline and P&L reset to the
+      real account; see engine._reconcile_live).
+    - Going DRY-RUN: snapshot the current account value as the new baseline and
+      keep paper-trading forward from the holdings on hand (unrealized P&L and
+      the hold timer restart from here).
+
+    History rows are kept in the DB but hidden by advancing history_since, so the
+    dashboard starts visually fresh for the new run. Caller commits."""
+    st = get_settings(session)
+    pf = get_portfolio(session)
+    now = _now()
+    st.history_since = now
+    st.prev_rec_sig = None  # don't carry a pending 2-scan confirmation across modes
+    if to_live:
+        st.seeded = False   # next live cycle re-adopts the real account
+    else:
+        st.starting_balance = pf.total_value
+        if pf.has_position:
+            pf.pos_cost_basis_usd = pf.position_value
+            pf.pos_opened_at = now

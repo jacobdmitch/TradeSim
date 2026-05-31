@@ -91,9 +91,12 @@ def run_once(force: bool = False) -> CycleResult:
         rec = predictor.recommend(ranked, pf.pos_base, config.FEE_RATE)
 
         # Persist the recommendation only when it changes (matches the app).
-        last_rec = (
-            session.query(Recommendation).order_by(Recommendation.id.desc()).first()
-        )
+        # Scope to the current run so the first cycle after a mode switch always
+        # records a fresh recommendation.
+        rec_q = session.query(Recommendation)
+        if settings.history_since:
+            rec_q = rec_q.filter(Recommendation.ts >= settings.history_since)
+        last_rec = rec_q.order_by(Recommendation.id.desc()).first()
         changed = not (
             last_rec
             and last_rec.action == rec.action
