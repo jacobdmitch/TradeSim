@@ -5,6 +5,7 @@ a master kill switch and a balance floor, both enforced before any order.
 """
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -90,9 +91,12 @@ def run_once(force: bool = False) -> CycleResult:
         rec = predictor.recommend(ranked, pf.pos_base, config.FEE_RATE)
 
         # Persist the recommendation only when it changes (matches the app).
-        last_rec = (
-            session.query(Recommendation).order_by(Recommendation.id.desc()).first()
-        )
+        # Scope to the current run so the first cycle after a mode switch always
+        # records a fresh recommendation.
+        rec_q = session.query(Recommendation)
+        if settings.history_since:
+            rec_q = rec_q.filter(Recommendation.ts >= settings.history_since)
+        last_rec = rec_q.order_by(Recommendation.id.desc()).first()
         changed = not (
             last_rec
             and last_rec.action == rec.action
@@ -139,7 +143,17 @@ def run_once(force: bool = False) -> CycleResult:
         settings.prev_rec_sig = sig
 
         note = " ".join(note_parts)
-        session.add(ScanLog(candidates=len(scored), note=note))
+        # Persist the ranked candidates so the dashboard can show what the scan
+        # weighed (best-first by predicted edge after fees).
+        cand_payload = [
+            {"base": c.base, "edge": round(c.predicted_edge_pct, 4),
+             "momentum": round(c.momentum, 4),
+             "rsi": round(c.rsi, 1) if c.rsi is not None else None,
+             "change_24h": round(c.change_24h, 4), "trend_up": c.trend_up}
+            for c in ranked
+        ]
+        session.add(ScanLog(candidates=len(scored), note=note,
+                            candidates_json=json.dumps(cand_payload)))
         session.add(EquitySnapshot(
             total_value=pf.total_value, cash=pf.cash,
             position_value=pf.position_value, holding=pf.pos_base or "USD",
