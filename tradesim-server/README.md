@@ -15,6 +15,8 @@ money until you explicitly flip both switches from the dashboard.
   market data, score candidates, decide, and (if enabled) place orders.
 - **Web service** (`app/web.py`) — dashboard: portfolio, P&L, trade log,
   recommendation history, and the controls (kill switch, dry-run/live, run-now).
+  Tuned for iPhone: open it in Safari and **Share → Add to Home Screen** to run
+  it full-screen as a standalone web app with the TradeSim icon.
 - **Postgres** — stores settings, the portfolio, trades, recommendations, scans.
 
 ```
@@ -31,6 +33,7 @@ tradesim-server/
     db.py             # SQLAlchemy models (Postgres / local SQLite)
     engine.py         # one full cycle, with kill switch + balance floor
     web.py            # FastAPI dashboard
+    static/           # web app icons + favicon (Add to Home Screen)
 ```
 
 ## Safety model
