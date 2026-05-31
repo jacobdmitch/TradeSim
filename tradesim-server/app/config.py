@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, asdict
+from typing import Optional
 
 try:
     from dotenv import load_dotenv
@@ -58,7 +59,7 @@ class StrategyConfig:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, d: dict | None) -> "StrategyConfig":
+    def from_dict(cls, d: Optional[dict]) -> "StrategyConfig":
         if not d:
             return cls()
         return cls(**{k: d[k] for k in d if k in cls.__dataclass_fields__})
@@ -77,7 +78,7 @@ class RotationConfig:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, d: dict | None) -> "RotationConfig":
+    def from_dict(cls, d: Optional[dict]) -> "RotationConfig":
         if not d:
             return cls()
         return cls(**{k: d[k] for k in d if k in cls.__dataclass_fields__})

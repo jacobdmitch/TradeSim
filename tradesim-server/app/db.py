@@ -3,6 +3,7 @@ falling back to a local SQLite file for development."""
 from __future__ import annotations
 
 import os
+from typing import Optional
 from datetime import datetime, timezone
 
 from sqlalchemy import (
@@ -52,8 +53,8 @@ class Portfolio(Base):
     __tablename__ = "portfolio"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
     cash: Mapped[float] = mapped_column(Float, default=0.0)
-    pos_base: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    pos_product_id: Mapped[str | None] = mapped_column(String(48), nullable=True)
+    pos_base: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    pos_product_id: Mapped[Optional[str]] = mapped_column(String(48), nullable=True)
     pos_quantity: Mapped[float] = mapped_column(Float, default=0.0)
     pos_cost_basis_usd: Mapped[float] = mapped_column(Float, default=0.0)
     pos_mark_price: Mapped[float] = mapped_column(Float, default=0.0)
@@ -81,9 +82,9 @@ class Trade(Base):
     price: Mapped[float] = mapped_column(Float)
     quantity: Mapped[float] = mapped_column(Float)
     cash_flow: Mapped[float] = mapped_column(Float)    # negative on buy, positive on sell
-    realized_pnl: Mapped[float | None] = mapped_column(Float, nullable=True)
+    realized_pnl: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     mode: Mapped[str] = mapped_column(String(8), default="DRY")  # DRY | LIVE
-    order_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    order_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
 
 
 class Recommendation(Base):
@@ -91,8 +92,8 @@ class Recommendation(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     action: Mapped[str] = mapped_column(String(8))
-    from_base: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    to_base: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    from_base: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    to_base: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     rationale: Mapped[str] = mapped_column(Text)
     edge_pct: Mapped[float] = mapped_column(Float)
 
@@ -102,8 +103,8 @@ class ScanLog(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     candidates: Mapped[int] = mapped_column(Integer, default=0)
-    note: Mapped[str | None] = mapped_column(Text, nullable=True)
-    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
 
 def init_db() -> None:

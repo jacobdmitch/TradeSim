@@ -1,8 +1,7 @@
 """FastAPI dashboard: portfolio, P&L, trades, recommendations, and controls
 (kill switch, dry-run/live toggle, run-now). Server-rendered, no build step."""
-from __future__ import annotations
-
 from datetime import datetime, timezone
+from typing import Optional
 
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
@@ -22,7 +21,7 @@ def _startup():
     init_db()
 
 
-def _authorized(token: str | None) -> bool:
+def _authorized(token: Optional[str]) -> bool:
     if not config.DASHBOARD_TOKEN:
         return True
     return token == config.DASHBOARD_TOKEN
@@ -61,7 +60,7 @@ def api_state():
 
 
 @app.post("/run-now")
-def run_now(token: str | None = Form(default=None)):
+def run_now(token: Optional[str] = Form(default=None)):
     if not _authorized(token):
         return RedirectResponse("/?err=auth", status_code=303)
     run_once()
@@ -69,7 +68,7 @@ def run_now(token: str | None = Form(default=None)):
 
 
 @app.post("/toggle/enabled")
-def toggle_enabled(token: str | None = Form(default=None)):
+def toggle_enabled(token: Optional[str] = Form(default=None)):
     if not _authorized(token):
         return RedirectResponse("/?err=auth", status_code=303)
     with SessionLocal() as s:
@@ -84,7 +83,7 @@ def toggle_enabled(token: str | None = Form(default=None)):
 
 
 @app.post("/toggle/dry-run")
-def toggle_dry_run(token: str | None = Form(default=None), confirm: str | None = Form(default=None)):
+def toggle_dry_run(token: Optional[str] = Form(default=None), confirm: Optional[str] = Form(default=None)):
     if not _authorized(token):
         return RedirectResponse("/?err=auth", status_code=303)
     with SessionLocal() as s:
@@ -114,7 +113,7 @@ def dashboard(request: Request):
 
 # ---------- rendering ----------
 
-def _render(st: Settings, pf: Portfolio, rec, recs, trades, last_scan, realized, err: str | None = None) -> str:
+def _render(st: Settings, pf: Portfolio, rec, recs, trades, last_scan, realized, err: Optional[str] = None) -> str:
     total = pf.total_value
     ret = total - st.starting_balance
     ret_pct = (ret / st.starting_balance * 100) if st.starting_balance else 0.0
