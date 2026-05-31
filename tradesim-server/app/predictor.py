@@ -136,13 +136,23 @@ class Predictor:
 
 def select_candidates(stats: List[MarketStat], rotation: RotationConfig,
                       min_liquidity_usd: float, position_base: Optional[str],
-                      seed_base: str) -> List[MarketStat]:
-    """Liquid top movers plus the current holding and the seed coin."""
-    liquid = [s for s in stats if s.volume_usd >= min_liquidity_usd]
+                      seed_base: str, excluded_bases: Optional[set] = None) -> List[MarketStat]:
+    """Liquid top movers plus the current holding and the seed coin.
+
+    Tokens in excluded_bases are filtered from the regular candidate pool.
+    The current holding (position_base) is still tracked so the engine can
+    score it and decide to HOLD or EXIT; only entering/rotating *into* an
+    excluded token is blocked. seed_base is skipped if excluded."""
+    excluded = excluded_bases or set()
+    liquid = [s for s in stats if s.volume_usd >= min_liquidity_usd and s.base not in excluded]
     liquid.sort(key=lambda s: s.change_pct, reverse=True)
     picked = list(liquid[: rotation.candidate_count])
     picked_bases = {s.base for s in picked}
-    for base in [b for b in (position_base, seed_base) if b]:
+    # Always include current holding for scoring (allow HOLD/EXIT even if vetoed).
+    # Only force-include seed_base if it hasn't been excluded.
+    force_bases = [b for b in (position_base,) if b]
+    force_bases += [b for b in (seed_base,) if b and b not in excluded]
+    for base in force_bases:
         if base not in picked_bases:
             extra = next((s for s in stats if s.base == base), None)
             if extra:

@@ -108,6 +108,9 @@ CRON_GRANULARITY_MIN = 15  # must match render.yaml cron schedule
 # protective exit-to-cash is always allowed; this only blocks coin->coin flips.
 MIN_HOLD_HOURS_DEFAULT = int(os.environ.get("MIN_HOLD_HOURS", "6"))
 
+# Hours a token stays excluded after receiving 2 consecutive AI Auditor vetos.
+VETO_EXCLUSION_HOURS_DEFAULT = int(os.environ.get("VETO_EXCLUSION_HOURS", "24"))
+
 COINBASE_API_KEY = os.environ.get("COINBASE_API_KEY", "").strip()
 # Allow the PEM to be supplied with escaped newlines.
 COINBASE_API_SECRET = os.environ.get("COINBASE_API_SECRET", "").replace("\\n", "\n").strip()

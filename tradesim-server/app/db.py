@@ -49,6 +49,7 @@ class Settings(Base):
     interval_minutes: Mapped[int] = mapped_column(Integer, default=15)   # effective cadence
     prev_rec_sig: Mapped[Optional[str]] = mapped_column(String(96), nullable=True)  # 2-scan confirm
     min_hold_hours: Mapped[int] = mapped_column(Integer, default=6)      # min hold before rotating
+    veto_exclusion_hours: Mapped[int] = mapped_column(Integer, default=24)  # hours a token is banned after 2 consecutive vetos
     # Dashboard only shows history (trades/recs/equity/scans/audits) at or after
     # this time; advanced on each deliberate DRY-RUN<->LIVE switch to start fresh.
     history_since: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -153,6 +154,7 @@ def _run_migrations() -> None:
             ("prev_rec_sig", "VARCHAR(96)"),
             ("min_hold_hours", "INTEGER DEFAULT 6"),
             ("history_since", "TIMESTAMP"),
+            ("veto_exclusion_hours", "INTEGER DEFAULT 24"),
         ],
         "portfolio": [
             ("pos_opened_at", "TIMESTAMP"),
@@ -202,6 +204,35 @@ def get_settings(session) -> Settings:
 
 def get_portfolio(session) -> Portfolio:
     return session.get(Portfolio, 1)
+
+
+def get_veto_excluded_bases(session, exclusion_hours: int) -> dict:
+    """Return {base: expires_at} for tokens with 2 consecutive AI Auditor vetos
+    whose most recent veto falls within the exclusion window."""
+    from datetime import timedelta
+    if exclusion_hours <= 0:
+        return {}
+    now = _now()
+    cutoff = now - timedelta(hours=exclusion_hours)
+    bases = [b for (b,) in session.query(AuditLog.to_base).filter(
+        AuditLog.to_base.isnot(None)
+    ).distinct().all()]
+    result = {}
+    for base in bases:
+        recent = (
+            session.query(AuditLog)
+            .filter(AuditLog.to_base == base)
+            .order_by(AuditLog.id.desc())
+            .limit(2)
+            .all()
+        )
+        if len(recent) == 2 and all(a.verdict == "VETO" for a in recent):
+            latest_ts = recent[0].ts
+            if latest_ts.tzinfo is None:
+                latest_ts = latest_ts.replace(tzinfo=timezone.utc)
+            if latest_ts >= cutoff:
+                result[base] = latest_ts + timedelta(hours=exclusion_hours)
+    return result
 
 
 def reset_for_mode_switch(session, *, to_live: bool) -> None:

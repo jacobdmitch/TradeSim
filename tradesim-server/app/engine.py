@@ -15,7 +15,7 @@ from . import auditor, config, market
 from .broker import Broker, TradeResult
 from .db import (
     AuditLog, EquitySnapshot, Portfolio, Recommendation, ScanLog, Settings, SessionLocal,
-    get_portfolio, get_settings, init_db,
+    get_portfolio, get_settings, get_veto_excluded_bases, init_db,
 )
 from .predictor import CoinScore, Predictor, Recommendation as Rec, select_candidates
 
@@ -77,9 +77,15 @@ def run_once(force: bool = False) -> CycleResult:
             # If balances can't be read, abort the cycle rather than trade blind.
             _reconcile_live(broker, pf, settings, stats_by_base)
 
+        # Compute veto-excluded tokens (requires 2 consecutive auditor vetos).
+        excl_hours = getattr(settings, "veto_exclusion_hours", config.VETO_EXCLUSION_HOURS_DEFAULT)
+        audit_on = getattr(settings, "audit_enabled", False)
+        veto_excluded = get_veto_excluded_bases(session, excl_hours) if audit_on else {}
+
         # Candidates -> deep analysis on those with enough candles.
         candidates = select_candidates(stats, rotation, config.MIN_LIQUIDITY_USD,
-                                        pf.pos_base, config.SEED_BASE)
+                                        pf.pos_base, config.SEED_BASE,
+                                        set(veto_excluded.keys()) if veto_excluded else None)
         closes_map = market.fetch_closes_for([c.product_id for c in candidates])
         scored: List[CoinScore] = []
         for stat in candidates:
@@ -112,6 +118,8 @@ def run_once(force: bool = False) -> CycleResult:
         executed: List[TradeResult] = []
         note_parts = [f"mode={'DRY' if settings.dry_run else 'LIVE'}",
                       f"enabled={settings.enabled}"]
+        if veto_excluded:
+            note_parts.append(f"veto_excluded:{','.join(sorted(veto_excluded.keys()))}")
 
         # 2-scan confirmation: ENTER/ROTATE must persist across two consecutive
         # scans before acting (kills single-cycle whipsaw). EXIT acts immediately
