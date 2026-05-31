@@ -2,11 +2,13 @@
 (kill switch, dry-run/live toggle, run-now). Server-rendered, no build step."""
 import json
 from datetime import datetime, timezone
+from pathlib import Path
 from string import Template
 from typing import Optional
 
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from . import config
 from .db import (
@@ -16,6 +18,32 @@ from .db import (
 from .engine import run_once
 
 app = FastAPI(title="TradeSim Server")
+
+# Icons / manifest for "Add to Home Screen" on iPhone live here.
+_STATIC_DIR = Path(__file__).resolve().parent / "static"
+app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
+
+
+@app.get("/manifest.webmanifest")
+def manifest():
+    """Web app manifest so the dashboard installs as a standalone iPhone app."""
+    return JSONResponse({
+        "name": "TradeSim",
+        "short_name": "TradeSim",
+        "description": "Auto-rotation crypto trading dashboard.",
+        "start_url": "/",
+        "scope": "/",
+        "display": "standalone",
+        "orientation": "portrait",
+        "background_color": "#0c2233",
+        "theme_color": "#0c2233",
+        "icons": [
+            {"src": "/static/icon-192.png", "sizes": "192x192", "type": "image/png"},
+            {"src": "/static/icon-512.png", "sizes": "512x512", "type": "image/png"},
+            {"src": "/static/icon-512.png", "sizes": "512x512", "type": "image/png",
+             "purpose": "maskable"},
+        ],
+    }, media_type="application/manifest+json")
 
 
 @app.on_event("startup")
@@ -379,8 +407,18 @@ def _render(st: Settings, pf: Portfolio, rec, recs, trades, last_scan, realized,
 # Palette (coolors): d9ed92 b5e48c 99d98c 76c893 52b69a 34a0a4 168aad 1a759f 1e6091 184e77
 _PAGE = """<!doctype html>
 <html lang="en"><head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>TradeSim</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#0c2233">
+<link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+<!-- iPhone: run full-screen with a dark status bar when added to Home Screen -->
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="TradeSim">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <style>
   :root {
@@ -393,13 +431,27 @@ _PAGE = """<!doctype html>
   * { box-sizing:border-box; }
   body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
     color:var(--text); line-height:1.45;
+    -webkit-text-size-adjust:100%;
+    -webkit-tap-highlight-color:rgba(82,182,154,.2);
     background:
       radial-gradient(1200px 600px at 15% -10%, rgba(82,182,154,.18), transparent 60%),
       radial-gradient(1000px 500px at 110% 10%, rgba(22,138,173,.20), transparent 55%),
       var(--bg);
     min-height:100vh; }
-  .wrap { max-width: 920px; margin:0 auto; padding: 26px 18px 72px; }
+  /* Respect the iPhone notch / home indicator when run as a Home Screen app. */
+  .wrap { max-width: 920px; margin:0 auto;
+    padding: calc(26px + env(safe-area-inset-top)) calc(18px + env(safe-area-inset-right))
+             calc(72px + env(safe-area-inset-bottom)) calc(18px + env(safe-area-inset-left)); }
   .head { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+  /* Refresh button — iPhone web apps can't pull-to-refresh, so reload from here. */
+  .refresh { margin-left:auto; flex:none; width:40px; height:40px; border-radius:50%;
+    display:inline-flex; align-items:center; justify-content:center; text-decoration:none;
+    font-size:20px; line-height:1; color:#06202a;
+    background:linear-gradient(180deg,var(--leaf),var(--teal));
+    box-shadow:0 6px 16px rgba(82,182,154,.25);
+    transition:transform .25s ease, filter .12s ease; }
+  .refresh:hover { transform:rotate(90deg); filter:brightness(1.05); }
+  .refresh:active { transform:rotate(180deg); }
   h1 { font-size:24px; margin:0; font-weight:800; letter-spacing:-.02em;
     background:linear-gradient(90deg,var(--lime),var(--jade),var(--aqua),var(--sea));
     background-size:300% 100%; -webkit-background-clip:text; background-clip:text;
@@ -436,7 +488,28 @@ _PAGE = """<!doctype html>
     box-shadow:0 10px 30px rgba(0,0,0,.22);
     opacity:0; transform:translateY(10px); animation:rise .6s ease forwards .12s; }
   .charts { display:grid; grid-template-columns:2fr 1fr; gap:14px; }
-  @media (max-width:640px){ .charts{ grid-template-columns:1fr } .grid{ grid-template-columns:1fr } }
+  @media (max-width:640px){
+    .charts{ grid-template-columns:1fr } .grid{ grid-template-columns:1fr }
+    h1{ font-size:21px } .cbox{ height:200px }
+    /* Trades fit the screen width: smaller type and cells wrap to a second
+       line instead of scrolling sideways. */
+    th,td{ padding:7px 5px; font-size:11px; }
+    .tradespanel{ padding:12px; }
+    /* On phones only: bound to ~10 rows and scroll vertically (sticky header).
+       The panel keeps non-scrolling side gutters so swiping the edges scrolls
+       the whole page rather than the inner table. */
+    .tscroll{ max-height:24rem; overflow-y:auto; overflow-x:hidden;
+      -webkit-overflow-scrolling:touch; }
+    .tscroll thead th{ position:sticky; top:0; background:var(--panel2);
+      box-shadow:inset 0 -1px 0 var(--line); z-index:2; }
+    /* Controls become full-width, comfortably tappable rows. */
+    .controls{ gap:8px; }
+    .controls form.inline, .controls button{ width:100%; }
+    .controls button{ padding:13px 15px; }
+    /* Stack the knob above its readout so the row never overflows narrow screens. */
+    .knobwrap{ flex-direction:column; gap:14px; align-items:flex-start; }
+    .knobread .big{ font-size:32px; }
+  }
   .chart-title { font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); margin:0 0 10px; }
   .cbox { position:relative; height:240px; }
   .cbox canvas { position:absolute; inset:0; }
@@ -471,6 +544,7 @@ _PAGE = """<!doctype html>
   th,td { text-align:left; padding:9px 6px; border-bottom:1px solid var(--line); font-variant-numeric:tabular-nums; }
   th { color:var(--muted); font-weight:700; font-size:11px; text-transform:uppercase; letter-spacing:.04em; }
   tbody tr { transition:background .12s ease; } tbody tr:hover { background:rgba(82,182,154,.07); }
+  .tradespanel { padding:14px 20px; }
   .buy { color:var(--grass); font-weight:700; } .sell { color:var(--neg); font-weight:700; }
   .muted { color:var(--muted); } .small { font-size:12px; } .err { color:var(--neg); }
   .banner { background:rgba(244,151,142,.14); color:#ffd0c9; border:1px solid rgba(244,151,142,.35);
@@ -514,7 +588,8 @@ _PAGE = """<!doctype html>
     color:var(--muted); margin-top:10px; }
 </style></head>
 <body><div class="wrap">
-  <div class="head"><h1>TradeSim</h1> $mode_badge $enabled_badge $audit_badge</div>
+  <div class="head"><h1>TradeSim</h1> $mode_badge $enabled_badge $audit_badge
+    <a class="refresh" href="/" aria-label="Refresh" title="Refresh">⟳</a></div>
   <div class="sub">Seed $seed · started at $$${start} · ${floor_note}auto-rotation strategy</div>
 
   <div class="grid">
@@ -555,11 +630,13 @@ _PAGE = """<!doctype html>
   $scan_line
 
   <h2>Recent trades</h2>
-  <div class="panel" style="padding:8px 14px">
-  <table>
-    <thead><tr><th>When</th><th>Side</th><th>Coin</th><th>Qty</th><th>Price</th><th>Cash flow</th><th>Fee</th><th>P&amp;L</th><th>Mode</th></tr></thead>
-    <tbody>$trade_rows</tbody>
-  </table></div>
+  <div class="panel tradespanel">
+    <div class="tscroll">
+    <table>
+      <thead><tr><th>When</th><th>Side</th><th>Coin</th><th>Qty</th><th>Price</th><th>Cash flow</th><th>Fee</th><th>P&amp;L</th><th>Mode</th></tr></thead>
+      <tbody>$trade_rows</tbody>
+    </table></div>
+  </div>
   <p class="muted small">Realized P&amp;L to date: $$${realized} · Fees paid to date: $$${fees_total}</p>
 
   <h2>Recommendation history</h2>
