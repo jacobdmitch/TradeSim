@@ -3,15 +3,29 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 77;
+	objectVersion = 70;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		5353E40C2FCBC43D00323A2D /* TESTFLIGHT_SETUP.md in Resources */ = {isa = PBXBuildFile; fileRef = 5353E40B2FCBC43D00323A2D /* TESTFLIGHT_SETUP.md */; };
+		5353E40E2FCBC47A00323A2D /* APP_STORE_METADATA.md in Resources */ = {isa = PBXBuildFile; fileRef = 5353E40D2FCBC47A00323A2D /* APP_STORE_METADATA.md */; };
+		5353E4102FCBC4AB00323A2D /* prepare_testflight.sh in Resources */ = {isa = PBXBuildFile; fileRef = 5353E40F2FCBC4AB00323A2D /* prepare_testflight.sh */; };
+		5353E4122FCBC4DE00323A2D /* TESTFLIGHT_CHECKLIST.txt in Resources */ = {isa = PBXBuildFile; fileRef = 5353E4112FCBC4DE00323A2D /* TESTFLIGHT_CHECKLIST.txt */; };
+		5353E4142FCBC52B00323A2D /* TESTFLIGHT_READY.txt in Resources */ = {isa = PBXBuildFile; fileRef = 5353E4132FCBC52B00323A2D /* TESTFLIGHT_READY.txt */; };
+		5353E4162FCBC57700323A2D /* README 2.md in Resources */ = {isa = PBXBuildFile; fileRef = 5353E4152FCBC57700323A2D /* README 2.md */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		5353E40B2FCBC43D00323A2D /* TESTFLIGHT_SETUP.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = TESTFLIGHT_SETUP.md; sourceTree = "<group>"; };
+		5353E40D2FCBC47A00323A2D /* APP_STORE_METADATA.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = APP_STORE_METADATA.md; sourceTree = "<group>"; };
+		5353E40F2FCBC4AB00323A2D /* prepare_testflight.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = prepare_testflight.sh; sourceTree = "<group>"; };
+		5353E4112FCBC4DE00323A2D /* TESTFLIGHT_CHECKLIST.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = TESTFLIGHT_CHECKLIST.txt; sourceTree = "<group>"; };
+		5353E4132FCBC52B00323A2D /* TESTFLIGHT_READY.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = TESTFLIGHT_READY.txt; sourceTree = "<group>"; };
+		5353E4152FCBC57700323A2D /* README 2.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "README 2.md"; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		1A0000000000000000000002 /* TradeSim */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			path = TradeSim;
-			sourceTree = "<group>";
-		};
+		1A0000000000000000000002 /* TradeSim */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = TradeSim; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -30,13 +44,18 @@
 			children = (
 				1A0000000000000000000002 /* TradeSim */,
 				1A0000000000000000000003 /* Products */,
+				5353E40B2FCBC43D00323A2D /* TESTFLIGHT_SETUP.md */,
+				5353E40D2FCBC47A00323A2D /* APP_STORE_METADATA.md */,
+				5353E40F2FCBC4AB00323A2D /* prepare_testflight.sh */,
+				5353E4112FCBC4DE00323A2D /* TESTFLIGHT_CHECKLIST.txt */,
+				5353E4132FCBC52B00323A2D /* TESTFLIGHT_READY.txt */,
+				5353E4152FCBC57700323A2D /* README 2.md */,
 			);
 			sourceTree = "<group>";
 		};
 		1A0000000000000000000003 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				1A0000000000000000000004 /* TradeSim.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -61,7 +80,6 @@
 			);
 			name = TradeSim;
 			productName = TradeSim;
-			productReference = 1A0000000000000000000004 /* TradeSim.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -72,7 +90,7 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
 				LastSwiftUpdateCheck = 1600;
-				LastUpgradeCheck = 1600;
+				LastUpgradeCheck = 2650;
 				TargetAttributes = {
 					1A0000000000000000000006 = {
 						CreatedOnToolsVersion = 16.0;
@@ -102,6 +120,12 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				5353E40E2FCBC47A00323A2D /* APP_STORE_METADATA.md in Resources */,
+				5353E4142FCBC52B00323A2D /* TESTFLIGHT_READY.txt in Resources */,
+				5353E4162FCBC57700323A2D /* README 2.md in Resources */,
+				5353E40C2FCBC43D00323A2D /* TESTFLIGHT_SETUP.md in Resources */,
+				5353E4102FCBC4AB00323A2D /* prepare_testflight.sh in Resources */,
+				5353E4122FCBC4DE00323A2D /* TESTFLIGHT_CHECKLIST.txt in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -153,6 +177,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = 46775G98SG;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
@@ -176,6 +201,7 @@
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 			};
@@ -216,6 +242,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = 46775G98SG;
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
@@ -232,6 +259,7 @@
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				VALIDATE_PRODUCT = YES;
 			};

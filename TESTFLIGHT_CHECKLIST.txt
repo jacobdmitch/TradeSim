@@ -1,0 +1,272 @@
+┌──────────────────────────────────────────────────────────────┐
+│                                                              │
+│          TradeSim TestFlight - Quick Checklist               │
+│                                                              │
+└──────────────────────────────────────────────────────────────┘
+
+BEFORE YOU START
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Prerequisites:
+  [ ] Apple Developer Program membership ($99/year)
+  [ ] Xcode installed and updated
+  [ ] Apple ID added to Xcode (Settings → Accounts)
+  [ ] Physical iOS device for testing
+
+STEP 1: PREPARE APP ICON
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  [ ] Open AppIconGenerator.swift in Xcode
+  [ ] Export 1024×1024 PNG
+  [ ] Save as AppIcon-1024.png
+  [ ] Run: ./generate_icons.sh
+  [ ] Open Xcode → Assets.xcassets
+  [ ] Import all generated icons
+  [ ] Verify no warnings on AppIcon
+
+STEP 2: CONFIGURE XCODE PROJECT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  [ ] Open project in Xcode
+  [ ] Select TradeSim target
+  [ ] General tab:
+      [ ] Display Name: TradeSim
+      [ ] Bundle Identifier: com.yourcompany.TradeSim
+      [ ] Version: 1.0.0
+      [ ] Build: 1
+  
+  [ ] Signing & Capabilities tab:
+      [ ] ✓ Automatically manage signing
+      [ ] Select your Team
+      [ ] Verify provisioning profile appears
+  
+  [ ] Info tab:
+      [ ] Add: Privacy - User Notifications Usage Description
+      [ ] Value: "TradeSim sends notifications about rotation 
+                 recommendations to help you stay informed."
+
+STEP 3: TEST ON DEVICE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  [ ] Connect iPhone/iPad via USB or WiFi
+  [ ] Select device in Xcode scheme selector
+  [ ] Build and run (Cmd+R)
+  [ ] Test thoroughly:
+      [ ] Loading screen appears
+      [ ] All 5 tabs work
+      [ ] Portfolio updates
+      [ ] Rotation recommendations appear
+      [ ] Settings save
+      [ ] Notifications request permission
+      [ ] No crashes
+
+STEP 4: CREATE APP IN APP STORE CONNECT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  [ ] Visit: https://appstoreconnect.apple.com
+  [ ] Sign in with Apple ID
+  [ ] Click "My Apps" → "+" → "New App"
+  [ ] Select:
+      [ ] Platform: iOS
+      [ ] Name: TradeSim
+      [ ] Primary Language: English (U.S.)
+      [ ] Bundle ID: (select from dropdown)
+      [ ] SKU: TRADESIM001
+  [ ] Click "Create"
+
+STEP 5: CREATE ARCHIVE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  [ ] In Xcode scheme selector (top-left):
+      [ ] Select "Any iOS Device (arm64)"
+      [ ] NOT a simulator!
+  
+  [ ] Menu: Product → Archive
+  [ ] Wait for build to complete (1-5 minutes)
+  [ ] Organizer window opens automatically
+
+STEP 6: DISTRIBUTE TO TESTFLIGHT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+In Organizer:
+  [ ] Select your archive
+  [ ] Click "Distribute App"
+  [ ] Choose: "TestFlight & App Store"
+  [ ] Choose: "Upload"
+  [ ] Distribution options:
+      [ ] ✓ Upload your app's symbols
+      [ ] ✓ Manage Version and Build Number
+  [ ] Click "Next"
+  [ ] Choose: "Automatically manage signing"
+  [ ] Click "Next"
+  [ ] Review information
+  [ ] Click "Upload"
+  [ ] Wait for upload (5-15 minutes)
+  [ ] Success message appears
+
+STEP 7: CONFIGURE IN APP STORE CONNECT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  [ ] Go to App Store Connect
+  [ ] Select TradeSim
+  [ ] Click "TestFlight" tab
+  [ ] Wait for "Processing" to complete (5-30 min)
+  [ ] You'll receive email when ready
+
+When build is ready:
+  [ ] Click on build number
+  [ ] Fill in "Test Information":
+      [ ] What to Test: (describe features)
+      [ ] Privacy Policy URL: (if you have one)
+  
+  [ ] Export Compliance:
+      [ ] Uses encryption? → YES
+      [ ] Exempt? → YES
+      [ ] Standard encryption? → YES
+  
+  [ ] Click "Save"
+
+STEP 8: ADD TESTERS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Internal Testing (Team Members):
+  [ ] TestFlight → Internal Testing
+  [ ] Add team members' emails
+  [ ] Select builds to test
+  [ ] Testers receive invitation immediately
+
+External Testing (Beta Testers):
+  [ ] TestFlight → External Testing
+  [ ] Create new group
+  [ ] Add tester emails or enable Public Link
+  [ ] Select builds to test
+  [ ] Submit for Beta App Review
+  [ ] Wait for approval (24-48 hours)
+
+STEP 9: SUBMIT FOR BETA REVIEW (External Only)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  [ ] Fill in required fields:
+      [ ] Contact email
+      [ ] Contact phone
+      [ ] Review notes (see APP_STORE_METADATA.md)
+  [ ] Click "Submit for Review"
+  [ ] Wait for email confirmation
+  [ ] Approval usually takes 24-48 hours
+
+STEP 10: DISTRIBUTE TO TESTERS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+After approval:
+  [ ] Share TestFlight link or invitations
+  [ ] Testers install TestFlight app
+  [ ] Testers install TradeSim
+  [ ] Monitor feedback and crashes
+
+TROUBLESHOOTING
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Issue: Can't select "Any iOS Device"
+  → Make sure no simulator is connected
+  → Disconnect devices temporarily
+  → Restart Xcode if needed
+
+Issue: Signing failed
+  → Xcode → Settings → Accounts
+  → Download Manual Profiles
+  → Enable "Automatically manage signing"
+
+Issue: Missing app icon
+  → Run ./generate_icons.sh
+  → Import to Assets.xcassets
+  → Ensure 1024×1024 slot is filled
+
+Issue: Upload failed
+  → Check internet connection
+  → Verify certificates are valid
+  → Try archiving again
+  → Check Apple system status
+
+Issue: Build stuck "Processing"
+  → Usually takes 5-30 minutes
+  → If > 1 hour, check email for errors
+  → May need to re-upload
+
+UPDATING BUILDS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+For each new build:
+  [ ] Increment Build number (1 → 2 → 3...)
+  [ ] Update Version if major changes (1.0.0 → 1.1.0)
+  [ ] Test on device
+  [ ] Create new archive
+  [ ] Upload to TestFlight
+  [ ] Add to test groups
+  [ ] Testers get update notification
+
+HELPFUL COMMANDS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# Check readiness
+./prepare_testflight.sh
+
+# Generate icons
+./generate_icons.sh
+
+# Test on simulator
+./quick_test.sh
+
+# Clean build
+# In Xcode: Cmd+Shift+K
+
+# Archive
+# In Xcode: Product → Archive (with "Any iOS Device" selected)
+
+DOCUMENTATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Full Guides:
+  → TESTFLIGHT_SETUP.md      (Complete step-by-step)
+  → APP_STORE_METADATA.md    (Descriptions & metadata)
+  → START_HERE.md            (Testing guide)
+
+TIMELINE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Day 1:
+  - Configure project (30 min)
+  - Test on device (30 min)
+  - Create archive (10 min)
+  - Upload to TestFlight (15 min)
+  - Configure in App Store Connect (20 min)
+  → Build processing: 5-30 min
+
+Day 1-2:
+  - Submit for Beta Review
+  → Review time: 24-48 hours
+
+Day 2-3:
+  - Approved!
+  - Distribute to testers
+  - Collect feedback
+
+Total: 2-3 days from start to testers having app
+
+SUCCESS CRITERIA
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+You'll know it worked when:
+  ✓ Archive uploaded successfully
+  ✓ Build appears in App Store Connect
+  ✓ Processing completes
+  ✓ Beta review approved (external)
+  ✓ Testers receive invitation
+  ✓ Testers can install app
+  ✓ App runs on tester devices
+  ✓ Feedback starts coming in
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Keep this checklist handy during your TestFlight setup!
+
+For detailed instructions, see TESTFLIGHT_SETUP.md

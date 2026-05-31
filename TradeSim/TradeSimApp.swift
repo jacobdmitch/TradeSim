@@ -3,16 +3,32 @@ import SwiftUI
 @main
 struct TradeSimApp: App {
     @State private var model = TradeSimModel()
+    @State private var isLoading = true
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup {
-            RootView()
-                .environment(model)
-                .task {
-                    await NotificationManager.shared.requestAuthorization()
-                    model.start()
+            ZStack {
+                if isLoading {
+                    LoadingView()
+                        .transition(.opacity)
+                } else {
+                    RootView()
+                        .environment(model)
+                        .transition(.opacity)
                 }
+            }
+            .task {
+                await NotificationManager.shared.requestAuthorization()
+                model.start()
+                
+                // Show loading screen for at least 1.5 seconds for smooth UX
+                try? await Task.sleep(for: .seconds(1.5))
+                
+                withAnimation(.easeInOut(duration: 0.5)) {
+                    isLoading = false
+                }
+            }
         }
         .onChange(of: scenePhase) { _, phase in
             switch phase {

@@ -1,0 +1,101 @@
+┌──────────────────────────────────────────────────────────────┐
+│                                                              │
+│               TradeSim Testing - Quick Reference             │
+│                                                              │
+└──────────────────────────────────────────────────────────────┘
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+⚡️ FASTEST WAY TO TEST
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. Open TradeSim.xcodeproj in Xcode
+2. Select iPhone 15 Pro simulator
+3. Press Cmd+R
+4. Watch loading screen appear!
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📂 FILES TO OPEN
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+VisualTestSuite.swift     → Complete visual testing (4 tabs)
+AppIconGenerator.swift    → Icon creator with export
+START_HERE.md            → Complete setup guide
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+⌨️  SIMULATOR KEYBOARD SHORTCUTS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Cmd+R             Build and run
+Cmd+Shift+H       Go to home screen (see icon!)
+Cmd+Shift+K       Clean build
+Cmd+K             Toggle keyboard
+Cmd+S             Take screenshot
+Cmd+.             Stop running app
+
+Features menu:
+  → Toggle Appearance    (Switch light/dark mode)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔧 COMMAND LINE (Terminal)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+./make_executable.sh                    First time setup
+./setup_sim_testing.sh                  Environment check
+./quick_test.sh                         Build & launch
+./generate_icons.sh                     Create all icon sizes
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ QUICK CHECKLIST
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+[ ] Loading screen appears
+[ ] Icon rotates
+[ ] Chart bars animate
+[ ] Smooth transition (1.5s)
+[ ] Main app loads
+[ ] All 5 tabs work
+[ ] Home screen icon visible (Cmd+Shift+H)
+[ ] Dark mode works
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🎨 DESIGN SPECS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Blue:   #007AFF   RGB(0, 122, 255)
+Cyan:   #5AC8FA   RGB(90, 200, 250)
+White:  #FFFFFF   RGB(255, 255, 255)
+
+Icon: 1024×1024 PNG (required for App Store)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🐛 COMMON FIXES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Problem              Fix
+────────────────────────────────────────────────────────────
+Won't build          Cmd+Shift+K, then rebuild
+No loading screen    Check TradeSimApp.swift
+Icon blank           Run ./generate_icons.sh
+Scripts won't run    ./make_executable.sh
+Choppy animation     Normal in Simulator
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📱 TEST ON THESE SIMULATORS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✓ iPhone 15 Pro        (Default)
+✓ iPhone SE            (Small screen)
+✓ iPhone 15 Pro Max    (Large screen)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📚 FULL DOCUMENTATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+START_HERE.md               → Complete guide
+TESTING_CHECKLIST.md        → Detailed checklist
+AppIconDesignGuide.md       → Design specs
+VISUAL_ASSETS_SUMMARY.txt   → Overview
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Keep this handy while testing!
