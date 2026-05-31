@@ -191,11 +191,21 @@ def _render(st: Settings, pf: Portfolio, rec, recs, trades, last_scan, realized,
         upnl = pf.position_value - pf.pos_cost_basis_usd
         upnl_pct = (upnl / pf.pos_cost_basis_usd * 100) if pf.pos_cost_basis_usd else 0.0
         upnl_class = "pos" if upnl >= 0 else "neg"
+        min_h = getattr(st, "min_hold_hours", 6)
+        held_line = ""
+        opened = getattr(pf, "pos_opened_at", None)
+        if opened is not None:
+            if opened.tzinfo is None:
+                opened = opened.replace(tzinfo=timezone.utc)
+            age_h = (datetime.now(timezone.utc) - opened).total_seconds() / 3600
+            locked = " 🔒" if age_h < min_h else ""
+            held_line = f"<span>held {age_h:.1f}h · min {min_h}h{locked}</span>"
         holding_detail = (
             f"<div class='hdetail'>"
             f"<span>price ${cur_price:,.6f}</span>"
             f"<span>entry ${entry_price:,.6f}</span>"
             f"<span class='{upnl_class}'>unrealized ${upnl:+,.2f} ({upnl_pct:+.1f}%)</span>"
+            f"{held_line}"
             f"</div>"
         )
     else:
@@ -289,6 +299,21 @@ def _render(st: Settings, pf: Portfolio, rec, recs, trades, last_scan, realized,
         f'<form class="inline" method="post" action="/toggle/audit">{token_field}'
         f'<button class="ghost">{"Disable AI audit" if audit_on else "Enable AI audit"}</button></form>'
     )
+    # Compact summary of the most recent AI audit decision (shown under the rec).
+    if audit_on and audits:
+        a0 = audits[0]
+        cls = "veto" if a0.verdict == "VETO" else "pos"
+        icon = "⛔" if a0.verdict == "VETO" else "✓"
+        tgt = f" {a0.action}{(' → ' + _esc(a0.to_base)) if a0.to_base else ''}" if a0.action else ""
+        audit_summary = (
+            f"<div class='auditsum {cls}'><span class='av'>{icon} AI audit: {a0.verdict}</span>"
+            f"<span class='muted'>{tgt} — {_esc(a0.reason)} · {_ago(a0.ts)}</span></div>"
+        )
+    elif audit_on:
+        audit_summary = "<div class='auditsum muted'>AI audit on — no decision logged yet.</div>"
+    else:
+        audit_summary = ""
+
     if audits:
         audit_rows = "".join(
             f"<li><b class='{ 'veto' if a.verdict=='VETO' else 'buy'}'>{a.verdict}</b> "
@@ -326,6 +351,7 @@ def _render(st: Settings, pf: Portfolio, rec, recs, trades, last_scan, realized,
         "audit_badge": audit_badge,
         "audit_form": audit_form,
         "audit_section": audit_section,
+        "audit_summary": audit_summary,
         "total": f"{total:,.2f}",
         "total_raw": f"{total:.4f}",
         "ret": f"{ret:+,.2f}",
@@ -453,6 +479,11 @@ _PAGE = """<!doctype html>
   ul { padding-left:18px; } li { margin-bottom:6px; font-size:13px; }
   .disclaimer { margin-top:30px; font-size:12px; color:var(--muted); opacity:.8; }
   .pending { color:var(--lime); font-weight:600; }
+  .auditsum { margin:10px 0 0; padding:9px 12px; border-radius:10px; font-size:13px;
+    background:rgba(52,160,164,.10); border:1px solid var(--line);
+    display:flex; gap:8px; flex-wrap:wrap; align-items:baseline; }
+  .auditsum .av { font-weight:800; letter-spacing:.02em; }
+  .auditsum.pos .av { color:var(--grass); } .auditsum.veto .av { color:var(--neg); }
   /* Retro cadence knob */
   .knobwrap { display:flex; align-items:center; gap:26px; padding:8px 4px; }
   .knob { position:relative; width:184px; height:184px; border-radius:50%;
@@ -520,6 +551,7 @@ _PAGE = """<!doctype html>
 
   <h2>Latest recommendation</h2>
   $rec_html
+  $audit_summary
   $scan_line
 
   <h2>Recent trades</h2>

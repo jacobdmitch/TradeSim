@@ -48,6 +48,7 @@ class Settings(Base):
     audit_enabled: Mapped[bool] = mapped_column(Boolean, default=False)  # Claude pre-trade audit
     interval_minutes: Mapped[int] = mapped_column(Integer, default=15)   # effective cadence
     prev_rec_sig: Mapped[Optional[str]] = mapped_column(String(96), nullable=True)  # 2-scan confirm
+    min_hold_hours: Mapped[int] = mapped_column(Integer, default=6)      # min hold before rotating
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
 
 
@@ -61,6 +62,7 @@ class Portfolio(Base):
     pos_quantity: Mapped[float] = mapped_column(Float, default=0.0)
     pos_cost_basis_usd: Mapped[float] = mapped_column(Float, default=0.0)
     pos_mark_price: Mapped[float] = mapped_column(Float, default=0.0)
+    pos_opened_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
 
     @property
@@ -144,6 +146,10 @@ def _run_migrations() -> None:
             ("audit_enabled", "BOOLEAN DEFAULT FALSE"),
             ("interval_minutes", "INTEGER DEFAULT 15"),
             ("prev_rec_sig", "VARCHAR(96)"),
+            ("min_hold_hours", "INTEGER DEFAULT 6"),
+        ],
+        "portfolio": [
+            ("pos_opened_at", "TIMESTAMP"),
         ],
         "trades": [
             ("fee_usd", "FLOAT DEFAULT 0"),
@@ -174,6 +180,7 @@ def init_db() -> None:
                 starting_balance=config.STARTING_BALANCE_DEFAULT,
                 balance_floor_usd=config.BALANCE_FLOOR_DEFAULT,
                 interval_minutes=config.INTERVAL_MINUTES_DEFAULT,
+                min_hold_hours=config.MIN_HOLD_HOURS_DEFAULT,
             ))
         if s.get(Portfolio, 1) is None:
             s.add(Portfolio(id=1, cash=config.STARTING_BALANCE_DEFAULT))

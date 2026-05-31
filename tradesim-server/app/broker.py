@@ -14,6 +14,7 @@ from __future__ import annotations
 import time
 import uuid
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from decimal import ROUND_DOWN, Decimal
 from typing import Optional
 
@@ -156,6 +157,7 @@ class Broker:
         pf.pos_quantity = usd_value / price
         pf.pos_cost_basis_usd = usd_value
         pf.pos_mark_price = price
+        pf.pos_opened_at = datetime.now(timezone.utc)
 
     # ---- Enter: deploy all cash into `base` ----
     def enter(self, pf: Portfolio, base: str, product_id: str, price: float) -> Optional[TradeResult]:
@@ -172,6 +174,7 @@ class Broker:
             pf.pos_quantity = qty
             pf.pos_cost_basis_usd = invested
             pf.pos_mark_price = price
+            pf.pos_opened_at = datetime.now(timezone.utc)
             return TradeResult("BUY", base, price, qty, -spend, None, "DRY", fee_usd=spend * self.fee_rate)
 
         # LIVE: market buy using available USD as quote_size.

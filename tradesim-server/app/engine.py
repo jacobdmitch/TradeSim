@@ -119,8 +119,11 @@ def run_once(force: bool = False) -> CycleResult:
         # --- Execution gate ---
         if rec.action != "HOLD":
             allowed, reason = _execution_allowed(settings, pf, rec)
+            hold_block, hold_remaining = _within_min_hold(pf, settings)
             if not allowed:
                 note_parts.append(f"not_executed:{reason}")
+            elif rec.action == "ROTATE" and hold_block:
+                note_parts.append(f"min_hold:{hold_remaining:.1f}h_left")
             elif needs_confirm and not persisted:
                 note_parts.append("awaiting_confirmation:1of2")
             else:
@@ -180,6 +183,7 @@ def _reconcile_live(broker: Broker, pf: Portfolio, settings: Settings, stats_by_
             pf.pos_quantity = seed_qty
             pf.pos_mark_price = st.last
             pf.pos_cost_basis_usd = seed_qty * st.last  # basis = value at takeover (PnL starts at 0)
+            pf.pos_opened_at = datetime.now(timezone.utc)
         settings.seeded = True
         settings.starting_balance = pf.total_value  # real baseline for return %
 
@@ -241,6 +245,19 @@ def _run_audit(rec: Rec, ranked: List[CoinScore], pf: Portfolio, stats_by_base,
             reason=res.reason[:500], model=res.model,
         ))
     return res
+
+
+def _within_min_hold(pf: Portfolio, settings: Settings) -> tuple[bool, float]:
+    """(blocked, hours_remaining) — True if the position is younger than the
+    minimum hold. Used only to block coin->coin ROTATE churn, never EXIT."""
+    opened = getattr(pf, "pos_opened_at", None)
+    min_h = getattr(settings, "min_hold_hours", config.MIN_HOLD_HOURS_DEFAULT)
+    if not pf.pos_base or opened is None or min_h <= 0:
+        return False, 0.0
+    if opened.tzinfo is None:
+        opened = opened.replace(tzinfo=timezone.utc)
+    age_h = (datetime.now(timezone.utc) - opened).total_seconds() / 3600
+    return (age_h < min_h), max(min_h - age_h, 0.0)
 
 
 def _execution_allowed(settings: Settings, pf: Portfolio, rec: Rec) -> tuple[bool, str]:
@@ -337,6 +354,7 @@ def _rotate_cheapest(broker, pf, sell_stat, buy_stat, settings, record) -> None:
     pf.pos_quantity = realized_to
     pf.pos_cost_basis_usd = out_value
     pf.pos_mark_price = buy_stat.last
+    pf.pos_opened_at = datetime.now(timezone.utc)
     record(TradeResult("BUY", buy_stat.base, buy_stat.last, realized_to,
                        -out_value, None, "LIVE", tid, fee_usd=0.0))
     log.info("rotation route=convert (keep=%.4f > %.4f)", convert_keep, two_leg_keep)
