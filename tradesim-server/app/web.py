@@ -13,7 +13,8 @@ from fastapi.staticfiles import StaticFiles
 from . import config
 from .db import (
     AuditLog, EquitySnapshot, Portfolio, Recommendation, ScanLog, Settings, Trade,
-    SessionLocal, get_portfolio, get_settings, init_db, reset_for_mode_switch,
+    SessionLocal, get_portfolio, get_settings, get_veto_excluded_bases, init_db,
+    reset_for_mode_switch,
 )
 from .engine import run_once
 
@@ -183,9 +184,13 @@ def dashboard(request: Request):
         )
         equity = list(reversed(equity))  # oldest-first for the chart
         audits = _since(s.query(AuditLog), AuditLog.ts, since).order_by(AuditLog.id.desc()).limit(8).all()
+        excl_hours = getattr(st, "veto_exclusion_hours", config.VETO_EXCLUSION_HOURS_DEFAULT)
+        audit_on = getattr(st, "audit_enabled", False)
+        veto_excluded = get_veto_excluded_bases(s, excl_hours) if audit_on else {}
         err = request.query_params.get("err")
         return HTMLResponse(
-            _render(st, pf, rec, recs, trades, last_scan, realized, fees_total, equity, audits, err)
+            _render(st, pf, rec, recs, trades, last_scan, realized, fees_total, equity, audits,
+                    veto_excluded, err)
         )
 
 
@@ -258,7 +263,7 @@ def _candidate_modal(cands: list, held: Optional[str]) -> str:
 
 
 def _render(st: Settings, pf: Portfolio, rec, recs, trades, last_scan, realized, fees_total,
-            equity, audits, err: Optional[str] = None) -> str:
+            equity, audits, veto_excluded: Optional[dict] = None, err: Optional[str] = None) -> str:
     total = pf.total_value
     ret = total - st.starting_balance
     ret_pct = (ret / st.starting_balance * 100) if st.starting_balance else 0.0
@@ -413,6 +418,26 @@ def _render(st: Settings, pf: Portfolio, rec, recs, trades, last_scan, realized,
     else:
         audit_summary = ""
 
+    if veto_excluded:
+        now_utc = datetime.now(timezone.utc)
+        chips = []
+        for base, expires_at in sorted(veto_excluded.items()):
+            if expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=timezone.utc)
+            remaining_h = max((expires_at - now_utc).total_seconds() / 3600, 0)
+            chips.append(
+                f"<span class='excl-chip'>{_esc(base)} "
+                f"<span class='muted'>({remaining_h:.0f}h left)</span></span>"
+            )
+        excluded_banner = (
+            "<div class='excl-banner'>"
+            "<span class='excl-label'>⛔ Excluded after 2 vetos:</span> "
+            + " ".join(chips)
+            + "</div>"
+        )
+    else:
+        excluded_banner = ""
+
     if audits:
         audit_rows = "".join(
             f"<li><b class='{ 'veto' if a.verdict=='VETO' else 'buy'}'>{a.verdict}</b> "
@@ -451,6 +476,7 @@ def _render(st: Settings, pf: Portfolio, rec, recs, trades, last_scan, realized,
         "audit_form": audit_form,
         "audit_section": audit_section,
         "audit_summary": audit_summary,
+        "excluded_banner": excluded_banner,
         "total": f"{total:,.2f}",
         "total_raw": f"{total:.4f}",
         "ret": f"{ret:+,.2f}",
@@ -656,6 +682,12 @@ _PAGE = """<!doctype html>
     display:flex; gap:8px; flex-wrap:wrap; align-items:baseline; }
   .auditsum .av { font-weight:800; letter-spacing:.02em; }
   .auditsum.pos .av { color:var(--grass); } .auditsum.veto .av { color:var(--neg); }
+  .excl-banner { margin:10px 0 0; padding:9px 12px; border-radius:10px; font-size:13px;
+    background:rgba(244,151,142,.08); border:1px solid rgba(244,151,142,.25);
+    display:flex; gap:8px; flex-wrap:wrap; align-items:baseline; }
+  .excl-label { font-weight:800; color:var(--neg); letter-spacing:.02em; }
+  .excl-chip { background:rgba(244,151,142,.12); border:1px solid rgba(244,151,142,.20);
+    border-radius:6px; padding:2px 8px; font-size:12px; color:var(--neg); }
   /* Retro cadence knob */
   .knobwrap { display:flex; align-items:center; gap:26px; padding:8px 4px; }
   .knob { position:relative; width:184px; height:184px; border-radius:50%;
@@ -725,6 +757,7 @@ _PAGE = """<!doctype html>
   <h2>Latest recommendation</h2>
   $rec_html
   $audit_summary
+  $excluded_banner
   $scan_line
 
   <h2>Recent trades</h2>
