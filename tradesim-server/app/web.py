@@ -113,9 +113,13 @@ def toggle_enabled(token: Optional[str] = Form(default=None)):
         st.enabled = not st.enabled
         # Turning trading OFF also reverts to dry-run, so re-enabling later can't
         # silently resume live trading — going live stays a deliberate action.
+        # Treat the OFF switch as a fresh start (cashing out / something's wrong):
+        # snapshot the current account as the new dry-run baseline.
         if not st.enabled:
             st.dry_run = True
+            reset_for_mode_switch(s, to_live=False)
         s.commit()
+    run_once(force=True)  # refresh the dashboard from the new state immediately
     return RedirectResponse("/", status_code=303)
 
 
@@ -133,6 +137,7 @@ def toggle_dry_run(token: Optional[str] = Form(default=None), confirm: Optional[
         # Re-baseline + archive the prior run so each mode starts fresh.
         reset_for_mode_switch(s, to_live=going_live)
         s.commit()
+    run_once(force=True)  # run a cycle now so the new baseline/state shows at once
     return RedirectResponse("/", status_code=303)
 
 

@@ -49,15 +49,14 @@ tradesim-server/
 3. **Balance floor.** `BALANCE_FLOOR_USD` halts new entries/rotations once total
    value drops to/below it (a protective exit-to-cash is still allowed).
 4. **Acts only on a changed recommendation**, same as the app — it won't churn.
-5. **Switching modes starts a fresh run.** Flipping DRY-RUN ↔ LIVE re-baselines
-   and clears the dashboard to the new run (prior trades/recs/equity are kept in
-   the DB but hidden):
+5. **Switching modes starts a fresh run.** Flipping DRY-RUN ↔ LIVE (or turning
+   trading OFF, which also reverts to DRY-RUN) re-baselines and clears the
+   dashboard to the new run (prior trades/recs/equity are kept in the DB but
+   hidden), then runs one cycle immediately so the new state shows at once:
    - **→ LIVE:** the next cycle adopts your real Coinbase balances and holdings
      as the starting point, with return % and P&L measured from there.
-   - **→ DRY-RUN:** snapshots the current account value as the new baseline and
-     paper-trades forward from the holdings on hand.
-   (The kill switch turning trading OFF reverts to DRY-RUN as a safety stop and
-   does *not* re-baseline.)
+   - **→ DRY-RUN (incl. trading OFF):** snapshots the current account value as
+     the new baseline and paper-trades forward from the holdings on hand.
 
 ## Coinbase API key
 
