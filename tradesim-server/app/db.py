@@ -111,6 +111,8 @@ class ScanLog(Base):
     candidates: Mapped[int] = mapped_column(Integer, default=0)
     note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # JSON list of the ranked candidates this scan weighed (for the dashboard popup).
+    candidates_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
 
 class EquitySnapshot(Base):
@@ -153,6 +155,9 @@ def _run_migrations() -> None:
         ],
         "trades": [
             ("fee_usd", "FLOAT DEFAULT 0"),
+        ],
+        "scans": [
+            ("candidates_json", "TEXT"),
         ],
     }
     for table, cols_to_add in adds.items():

@@ -15,8 +15,9 @@ money until you explicitly flip both switches from the dashboard.
   market data, score candidates, decide, and (if enabled) place orders.
 - **Web service** (`app/web.py`) — dashboard: portfolio, P&L, trade log,
   recommendation history, and the controls (kill switch, dry-run/live, run-now).
-  Tuned for iPhone: open it in Safari and **Share → Add to Home Screen** to run
-  it full-screen as a standalone web app with the TradeSim icon.
+  Tap the candidate count under the recommendation to see the ranked shortlist
+  the last scan weighed. Tuned for iPhone: open it in Safari and **Share → Add
+  to Home Screen** to run it full-screen as a standalone web app with the icon.
 - **Postgres** — stores settings, the portfolio, trades, recommendations, scans.
 
 ```

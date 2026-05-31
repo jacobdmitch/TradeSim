@@ -204,6 +204,43 @@ def _knob(interval: int, token_field: str) -> str:
     )
 
 
+def _candidate_modal(cands: list, held: Optional[str]) -> str:
+    """Popup listing the coins the last scan ranked, best-first by predicted edge."""
+    rows = ""
+    for i, c in enumerate(cands):
+        base = _esc(c.get("base", "?"))
+        edge = c.get("edge", 0.0) or 0.0
+        ch = c.get("change_24h", 0.0) or 0.0
+        rsi = c.get("rsi")
+        trend = c.get("trend_up")
+        tags = ""
+        if held and c.get("base") == held:
+            tags += "<span class='ctag hold'>holding</span>"
+        if i == 0:
+            tags += "<span class='ctag top'>top pick</span>"
+        arrow = "<span class='pos'>↑</span>" if trend else "<span class='neg'>↓</span>"
+        rows += (
+            f"<tr><td>{base}{tags}</td>"
+            f"<td class='{'pos' if edge >= 0 else 'neg'}'>{edge:+.2f}%</td>"
+            f"<td class='{'pos' if ch >= 0 else 'neg'}'>{ch:+.1f}%</td>"
+            f"<td>{(f'{rsi:.0f}' if rsi is not None else '—')}</td>"
+            f"<td>{arrow}</td></tr>"
+        )
+    return (
+        "<dialog id='candmodal' class='modal'>"
+        "<div class='modal-head'><b>Candidates considered</b>"
+        "<button type='button' class='modal-x' aria-label='Close' "
+        "onclick=\"document.getElementById('candmodal').close()\">✕</button></div>"
+        "<p class='muted small'>Coins the last scan ranked by predicted edge after "
+        "fees, before deciding whether to rotate.</p>"
+        "<div class='modaltable'><table><thead><tr><th>Coin</th><th>Edge</th>"
+        "<th>24h</th><th>RSI</th><th>Trend</th></tr></thead>"
+        f"<tbody>{rows}</tbody></table></div>"
+        "<form method='dialog'><button class='ghost'>Close</button></form>"
+        "</dialog>"
+    )
+
+
 def _render(st: Settings, pf: Portfolio, rec, recs, trades, last_scan, realized, fees_total,
             equity, audits, err: Optional[str] = None) -> str:
     total = pf.total_value
@@ -314,11 +351,27 @@ def _render(st: Settings, pf: Portfolio, rec, recs, trades, last_scan, realized,
     pending = bool(last_scan and last_scan.note and "awaiting_confirmation" in last_scan.note)
     scan_line = ""
     if last_scan:
+        # When we have the ranked-candidate detail, make the count a button that
+        # opens a popup listing what the scan weighed; otherwise plain text.
+        try:
+            cand_list = json.loads(last_scan.candidates_json) if last_scan.candidates_json else []
+        except (ValueError, TypeError):
+            cand_list = []
+        if cand_list:
+            count_html = (
+                "<button type='button' class='candlink' "
+                "onclick=\"document.getElementById('candmodal').showModal()\">"
+                f"{last_scan.candidates} candidates</button>"
+            )
+            cand_modal = _candidate_modal(cand_list, pf.pos_base)
+        else:
+            count_html = f"{last_scan.candidates} candidates"
+            cand_modal = ""
         scan_line = (
-            f"<p class='muted small'>Last scan {_ago(last_scan.ts)} · {last_scan.candidates} candidates"
+            f"<p class='muted small'>Last scan {_ago(last_scan.ts)} · {count_html}"
             + (" · <span class='pending'>awaiting 2nd-scan confirmation</span>" if pending else "")
             + (f" · <span class='err'>error: {_esc(last_scan.error)}</span>" if last_scan.error else "")
-            + "</p>"
+            + "</p>" + cand_modal
         )
 
     floor_note = (
@@ -561,6 +614,27 @@ _PAGE = """<!doctype html>
   ul { padding-left:18px; } li { margin-bottom:6px; font-size:13px; }
   .disclaimer { margin-top:30px; font-size:12px; color:var(--muted); opacity:.8; }
   .pending { color:var(--lime); font-weight:600; }
+  /* Clickable candidate count + its popup. */
+  .candlink { background:none; border:0; box-shadow:none; padding:0; margin:0;
+    font:inherit; font-weight:700; color:var(--aqua); cursor:pointer;
+    text-decoration:underline; text-underline-offset:2px; }
+  .candlink:hover { transform:none; filter:brightness(1.15); box-shadow:none; }
+  dialog.modal { border:0; border-radius:16px; padding:18px; width:min(440px,92vw);
+    color:var(--text); background:linear-gradient(160deg,var(--panel),var(--panel2));
+    box-shadow:0 24px 70px rgba(0,0,0,.55); }
+  dialog.modal::backdrop { background:rgba(4,16,24,.62); }
+  .modal-head { display:flex; justify-content:space-between; align-items:center; }
+  .modal-head b { font-size:14px; }
+  .modal-x { background:none; border:0; box-shadow:none; color:var(--muted);
+    font-size:18px; padding:4px 6px; cursor:pointer; }
+  .modal-x:hover { color:var(--text); transform:none; box-shadow:none; }
+  .modaltable { max-height:60vh; overflow:auto; margin:10px 0 14px;
+    -webkit-overflow-scrolling:touch; }
+  .modaltable th, .modaltable td { padding:7px 6px; font-size:12px; }
+  .ctag { display:inline-block; margin-left:6px; font-size:9px; font-weight:800;
+    text-transform:uppercase; letter-spacing:.04em; padding:2px 6px; border-radius:999px; }
+  .ctag.hold { background:rgba(82,182,154,.18); color:var(--leaf); }
+  .ctag.top { background:rgba(217,237,146,.18); color:var(--lime); }
   .auditsum { margin:10px 0 0; padding:9px 12px; border-radius:10px; font-size:13px;
     background:rgba(52,160,164,.10); border:1px solid var(--line);
     display:flex; gap:8px; flex-wrap:wrap; align-items:baseline; }
