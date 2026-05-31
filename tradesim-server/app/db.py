@@ -46,6 +46,8 @@ class Settings(Base):
     starting_balance: Mapped[float] = mapped_column(Float, default=23.17)
     balance_floor_usd: Mapped[float] = mapped_column(Float, default=0.0)
     audit_enabled: Mapped[bool] = mapped_column(Boolean, default=False)  # Claude pre-trade audit
+    interval_minutes: Mapped[int] = mapped_column(Integer, default=15)   # effective cadence
+    prev_rec_sig: Mapped[Optional[str]] = mapped_column(String(96), nullable=True)  # 2-scan confirm
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
 
 
@@ -84,6 +86,7 @@ class Trade(Base):
     quantity: Mapped[float] = mapped_column(Float)
     cash_flow: Mapped[float] = mapped_column(Float)    # negative on buy, positive on sell
     realized_pnl: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    fee_usd: Mapped[float] = mapped_column(Float, default=0.0)   # trading cost on this leg
     mode: Mapped[str] = mapped_column(String(8), default="DRY")  # DRY | LIVE
     order_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
 
@@ -136,15 +139,25 @@ def _run_migrations() -> None:
     create_all() makes new tables but never alters existing ones."""
     from sqlalchemy import inspect, text
     insp = inspect(ENGINE)
-    try:
-        cols = {c["name"] for c in insp.get_columns("settings")}
-    except Exception:
-        return  # table not created yet; create_all will handle it
-    if "audit_enabled" not in cols:
-        with ENGINE.begin() as conn:
-            conn.execute(text(
-                "ALTER TABLE settings ADD COLUMN audit_enabled BOOLEAN DEFAULT FALSE"
-            ))
+    adds = {
+        "settings": [
+            ("audit_enabled", "BOOLEAN DEFAULT FALSE"),
+            ("interval_minutes", "INTEGER DEFAULT 15"),
+            ("prev_rec_sig", "VARCHAR(96)"),
+        ],
+        "trades": [
+            ("fee_usd", "FLOAT DEFAULT 0"),
+        ],
+    }
+    for table, cols_to_add in adds.items():
+        try:
+            existing = {c["name"] for c in insp.get_columns(table)}
+        except Exception:
+            continue  # table not created yet; create_all handles it
+        for name, ddl in cols_to_add:
+            if name not in existing:
+                with ENGINE.begin() as conn:
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}"))
 
 
 def init_db() -> None:
@@ -160,6 +173,7 @@ def init_db() -> None:
                 seeded=False,
                 starting_balance=config.STARTING_BALANCE_DEFAULT,
                 balance_floor_usd=config.BALANCE_FLOOR_DEFAULT,
+                interval_minutes=config.INTERVAL_MINUTES_DEFAULT,
             ))
         if s.get(Portfolio, 1) is None:
             s.add(Portfolio(id=1, cash=config.STARTING_BALANCE_DEFAULT))

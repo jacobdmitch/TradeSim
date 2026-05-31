@@ -19,7 +19,9 @@ services:
     runtime: python
     plan: starter
     rootDir: tradesim-server
-    schedule: "*/10 * * * *"
+    # Fires every 15 min (the knob's finest stop). The dashboard's cadence knob
+    # throttles to 15/30/45/60 by skipping fires that arrive early.
+    schedule: "*/15 * * * *"
     buildCommand: "pip install -r requirements.txt"
     startCommand: "python run_cycle.py"
     envVars:

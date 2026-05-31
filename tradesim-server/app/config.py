@@ -70,7 +70,7 @@ class RotationConfig:
     candidate_count: int = 12
     momentum_lookback: int = 6
     enter_threshold_pct: float = 0.5
-    rotation_threshold_pct: float = 1.5
+    rotation_threshold_pct: float = 3.0   # raised from 1.5 to cut marginal whipsaw rotations
     exit_threshold_pct: float = -1.0
     auto_rotate: bool = True
 
@@ -97,6 +97,12 @@ ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "").strip()
 AUDIT_MODEL = os.environ.get("AUDIT_MODEL", "claude-haiku-4-5-20251001").strip()
 AUDIT_ENABLED_DEFAULT = _b("AUDIT_ENABLED", False)
 AUDIT_MAX_SEARCHES = int(os.environ.get("AUDIT_MAX_SEARCHES", "3"))
+
+# Effective trading cadence (minutes). The Render cron fires every 15 min; this
+# throttles to a multiple of that. Tunable from the dashboard knob.
+INTERVAL_MINUTES_DEFAULT = int(os.environ.get("INTERVAL_MINUTES", "15"))
+INTERVAL_CHOICES = [15, 30, 45, 60]
+CRON_GRANULARITY_MIN = 15  # must match render.yaml cron schedule
 
 COINBASE_API_KEY = os.environ.get("COINBASE_API_KEY", "").strip()
 # Allow the PEM to be supplied with escaped newlines.

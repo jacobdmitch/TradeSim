@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import List, Optional
 
 from . import auditor, config, market
@@ -30,12 +31,23 @@ class CycleResult:
     error: Optional[str] = None
 
 
-def run_once() -> CycleResult:
+def run_once(force: bool = False) -> CycleResult:
     init_db()
     session = SessionLocal()
     try:
         settings: Settings = get_settings(session)
         pf: Portfolio = get_portfolio(session)
+
+        # --- Cadence gate: throttle the 15-min cron to the chosen interval ---
+        if not force:
+            last = session.query(ScanLog).order_by(ScanLog.id.desc()).first()
+            if last is not None and last.ts is not None:
+                last_ts = last.ts if last.ts.tzinfo else last.ts.replace(tzinfo=timezone.utc)
+                elapsed_min = (datetime.now(timezone.utc) - last_ts).total_seconds() / 60
+                interval = getattr(settings, "interval_minutes", config.INTERVAL_MINUTES_DEFAULT)
+                if elapsed_min < interval - (config.CRON_GRANULARITY_MIN / 2):
+                    return CycleResult(True, None, [], 0,
+                                       f"skipped: {elapsed_min:.0f}/{interval}min cadence")
 
         strategy = config.StrategyConfig()
         rotation = config.RotationConfig()
@@ -97,10 +109,21 @@ def run_once() -> CycleResult:
         note_parts = [f"mode={'DRY' if settings.dry_run else 'LIVE'}",
                       f"enabled={settings.enabled}"]
 
+        # 2-scan confirmation: ENTER/ROTATE must persist across two consecutive
+        # scans before acting (kills single-cycle whipsaw). EXIT acts immediately
+        # so a protective move to cash isn't delayed.
+        sig = f"{rec.action}|{rec.from_base}|{rec.to_base}"
+        persisted = (settings.prev_rec_sig == sig)
+        needs_confirm = rec.action in {"ENTER", "ROTATE"}
+
         # --- Execution gate ---
         if rec.action != "HOLD":
             allowed, reason = _execution_allowed(settings, pf, rec)
-            if allowed and changed:
+            if not allowed:
+                note_parts.append(f"not_executed:{reason}")
+            elif needs_confirm and not persisted:
+                note_parts.append("awaiting_confirmation:1of2")
+            else:
                 # Optional Claude pre-trade audit (veto-only, fail-open).
                 audit_res = _run_audit(rec, ranked, pf, stats_by_base, settings, session)
                 if audit_res is not None and audit_res.used and not audit_res.approved:
@@ -108,8 +131,9 @@ def run_once() -> CycleResult:
                 else:
                     executed = _execute(broker, rec, pf, stats_by_base, session, settings)
                     note_parts.append(f"executed={[t.action for t in executed]}")
-            else:
-                note_parts.append(f"not_executed:{reason}")
+
+        # Remember this scan's recommendation for next time's confirmation check.
+        settings.prev_rec_sig = sig
 
         note = " ".join(note_parts)
         session.add(ScanLog(candidates=len(scored), note=note))
@@ -238,7 +262,7 @@ def _execute(broker: Broker, rec: Rec, pf: Portfolio, stats_by_base, session, se
         session.add(Trade(
             action=tr.action, base=tr.base, price=tr.price, quantity=tr.quantity,
             cash_flow=tr.cash_flow, realized_pnl=tr.realized_pnl, mode=tr.mode,
-            order_id=tr.order_id,
+            order_id=tr.order_id, fee_usd=tr.fee_usd,
         ))
         results.append(tr)
 
@@ -303,15 +327,16 @@ def _rotate_cheapest(broker, pf, sell_stat, buy_stat, settings, record) -> None:
 
     out_value = realized_to * buy_stat.last
     cost_basis = pf.pos_cost_basis_usd
+    convert_cost = max(in_value - out_value, 0.0)  # spread+fee baked into the convert
     tid = f"convert:{quote.trade_id}"
     # Book the closed leg (realized P&L vs basis) and the opened leg, no USD touched.
     record(TradeResult("SELL", sell_stat.base, sell_stat.last, from_qty,
-                       out_value, out_value - cost_basis, "LIVE", tid))
+                       out_value, out_value - cost_basis, "LIVE", tid, fee_usd=convert_cost))
     pf.pos_base = buy_stat.base
     pf.pos_product_id = buy_stat.product_id
     pf.pos_quantity = realized_to
     pf.pos_cost_basis_usd = out_value
     pf.pos_mark_price = buy_stat.last
     record(TradeResult("BUY", buy_stat.base, buy_stat.last, realized_to,
-                       -out_value, None, "LIVE", tid))
+                       -out_value, None, "LIVE", tid, fee_usd=0.0))
     log.info("rotation route=convert (keep=%.4f > %.4f)", convert_keep, two_leg_keep)

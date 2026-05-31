@@ -31,6 +31,7 @@ class TradeResult:
     realized_pnl: Optional[float]
     mode: str              # DRY | LIVE
     order_id: Optional[str] = None
+    fee_usd: float = 0.0   # trading cost on this leg
 
 
 @dataclass
@@ -171,7 +172,7 @@ class Broker:
             pf.pos_quantity = qty
             pf.pos_cost_basis_usd = invested
             pf.pos_mark_price = price
-            return TradeResult("BUY", base, price, qty, -spend, None, "DRY")
+            return TradeResult("BUY", base, price, qty, -spend, None, "DRY", fee_usd=spend * self.fee_rate)
 
         # LIVE: market buy using available USD as quote_size.
         spend = pf.cash
@@ -187,7 +188,8 @@ class Broker:
         pf.pos_quantity = qty
         pf.pos_cost_basis_usd = invested
         pf.pos_mark_price = avg_price
-        return TradeResult("BUY", base, avg_price, qty, -fill["filled_value"], None, "LIVE", order_id)
+        return TradeResult("BUY", base, avg_price, qty, -fill["filled_value"], None, "LIVE", order_id,
+                           fee_usd=fill["fees"])
 
     # ---- Exit: liquidate the position back to USD ----
     def exit(self, pf: Portfolio, price: float) -> Optional[TradeResult]:
@@ -205,7 +207,7 @@ class Broker:
             pnl = proceeds - cost_basis
             pf.cash += proceeds
             self._clear_position(pf)
-            return TradeResult("SELL", base, price, qty, proceeds, pnl, "DRY")
+            return TradeResult("SELL", base, price, qty, proceeds, pnl, "DRY", fee_usd=gross * self.fee_rate)
 
         # LIVE: market sell the full base size.
         base_size = self._round_base(product_id, qty)
@@ -216,7 +218,8 @@ class Broker:
         pnl = proceeds - cost_basis
         pf.cash += proceeds
         self._clear_position(pf)
-        return TradeResult("SELL", base, avg_price, qty, proceeds, pnl, "LIVE", order_id)
+        return TradeResult("SELL", base, avg_price, qty, proceeds, pnl, "LIVE", order_id,
+                           fee_usd=fill["fees"])
 
     @staticmethod
     def _clear_position(pf: Portfolio) -> None:

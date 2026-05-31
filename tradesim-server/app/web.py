@@ -110,6 +110,18 @@ def toggle_audit(token: Optional[str] = Form(default=None)):
     return RedirectResponse("/", status_code=303)
 
 
+@app.post("/set/interval")
+def set_interval(value: int = Form(...), token: Optional[str] = Form(default=None)):
+    if not _authorized(token):
+        return RedirectResponse("/?err=auth", status_code=303)
+    if value in config.INTERVAL_CHOICES:
+        with SessionLocal() as s:
+            st = get_settings(s)
+            st.interval_minutes = value
+            s.commit()
+    return RedirectResponse("/", status_code=303)
+
+
 @app.get("/", response_class=HTMLResponse)
 def dashboard(request: Request):
     with SessionLocal() as s:
@@ -119,7 +131,9 @@ def dashboard(request: Request):
         recs = s.query(Recommendation).order_by(Recommendation.id.desc()).limit(10).all()
         trades = s.query(Trade).order_by(Trade.id.desc()).limit(25).all()
         last_scan = s.query(ScanLog).order_by(ScanLog.id.desc()).first()
-        realized = sum(t.realized_pnl or 0.0 for t in s.query(Trade).all())
+        all_trades = s.query(Trade).all()
+        realized = sum(t.realized_pnl or 0.0 for t in all_trades)
+        fees_total = sum(getattr(t, "fee_usd", 0.0) or 0.0 for t in all_trades)
         equity = (
             s.query(EquitySnapshot).order_by(EquitySnapshot.id.desc()).limit(300).all()
         )
@@ -127,13 +141,42 @@ def dashboard(request: Request):
         audits = s.query(AuditLog).order_by(AuditLog.id.desc()).limit(8).all()
         err = request.query_params.get("err")
         return HTMLResponse(
-            _render(st, pf, rec, recs, trades, last_scan, realized, equity, audits, err)
+            _render(st, pf, rec, recs, trades, last_scan, realized, fees_total, equity, audits, err)
         )
 
 
 # ---------- rendering ----------
 
-def _render(st: Settings, pf: Portfolio, rec, recs, trades, last_scan, realized,
+_KNOB_ANGLES = {15: -135, 30: -45, 45: 45, 60: 135}
+
+
+def _knob(interval: int, token_field: str) -> str:
+    """A retro rotary knob with 15/30/45/60-minute stops. Each stop is a tiny
+    form that posts the new cadence; the needle points to the current stop."""
+    cur_angle = _KNOB_ANGLES.get(interval, -135)
+    stops = ""
+    for v, a in _KNOB_ANGLES.items():
+        active = "active" if v == interval else ""
+        stops += (
+            f"<form class='stop {active}' method='post' action='/set/interval' "
+            f"style='transform:translate(-50%,-50%) rotate({a}deg) translate(0,-92px) rotate({-a}deg)'>"
+            f"{token_field}<input type='hidden' name='value' value='{v}'>"
+            f"<button type='submit'>{v}</button></form>"
+        )
+    return (
+        "<div class='knobwrap'>"
+        "<div class='knob'>"
+        f"<div class='needle' style='transform:translate(-50%,-100%) rotate({cur_angle}deg)'></div>"
+        "<div class='knobcap'></div>"
+        f"{stops}"
+        "</div>"
+        f"<div class='knobread'><span class='big'>{interval}</span><span class='unit'>min</span>"
+        "<span class='cap'>cycle cadence</span></div>"
+        "</div>"
+    )
+
+
+def _render(st: Settings, pf: Portfolio, rec, recs, trades, last_scan, realized, fees_total,
             equity, audits, err: Optional[str] = None) -> str:
     total = pf.total_value
     ret = total - st.starting_balance
@@ -217,20 +260,23 @@ def _render(st: Settings, pf: Portfolio, rec, recs, trades, last_scan, realized,
         f"<tr><td>{_ago(t.ts)}</td><td class='{ 'buy' if t.action=='BUY' else 'sell'}'>{t.action}</td>"
         f"<td>{_esc(t.base)}</td><td>{t.quantity:.6f}</td><td>${t.price:,.6f}</td>"
         f"<td>${t.cash_flow:,.2f}</td>"
+        f"<td class='muted'>${(getattr(t, 'fee_usd', 0.0) or 0.0):.2f}</td>"
         f"<td>{('$%+.2f' % t.realized_pnl) if t.realized_pnl is not None else '—'}</td>"
         f"<td><span class='badge {'live' if t.mode=='LIVE' else 'dry'}'>{t.mode}</span></td></tr>"
         for t in trades
-    ) or "<tr><td colspan='8' class='muted'>No trades yet.</td></tr>"
+    ) or "<tr><td colspan='9' class='muted'>No trades yet.</td></tr>"
 
     rec_rows = "".join(
         f"<li><b>{r.action}</b> {_esc(r.rationale)} <span class='muted'>({_ago(r.ts)})</span></li>"
         for r in recs
     ) or "<li class='muted'>None yet.</li>"
 
+    pending = bool(last_scan and last_scan.note and "awaiting_confirmation" in last_scan.note)
     scan_line = ""
     if last_scan:
         scan_line = (
             f"<p class='muted small'>Last scan {_ago(last_scan.ts)} · {last_scan.candidates} candidates"
+            + (" · <span class='pending'>awaiting 2nd-scan confirmation</span>" if pending else "")
             + (f" · <span class='err'>error: {_esc(last_scan.error)}</span>" if last_scan.error else "")
             + "</p>"
         )
@@ -266,7 +312,12 @@ def _render(st: Settings, pf: Portfolio, rec, recs, trades, last_scan, realized,
     })
     baseline_json = json.dumps(round(st.starting_balance, 4))
 
+    interval = getattr(st, "interval_minutes", config.INTERVAL_MINUTES_DEFAULT)
+    knob = _knob(interval, token_field)
+
     ctx = {
+        "fees_total": f"{fees_total:,.2f}",
+        "knob": knob,
         "seed": config.SEED_BASE,
         "start": f"{st.starting_balance:,.2f}",
         "floor_note": floor_note,
@@ -401,10 +452,39 @@ _PAGE = """<!doctype html>
   h2 { font-size:13px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); margin:26px 0 10px; }
   ul { padding-left:18px; } li { margin-bottom:6px; font-size:13px; }
   .disclaimer { margin-top:30px; font-size:12px; color:var(--muted); opacity:.8; }
+  .pending { color:var(--lime); font-weight:600; }
+  /* Retro cadence knob */
+  .knobwrap { display:flex; align-items:center; gap:26px; padding:8px 4px; }
+  .knob { position:relative; width:184px; height:184px; border-radius:50%;
+    background:
+      radial-gradient(circle at 50% 38%, #20465c 0%, #0d2638 62%, #08202f 100%);
+    border:1px solid #2a5871;
+    box-shadow: inset 0 3px 12px rgba(0,0,0,.6), inset 0 -2px 8px rgba(82,182,154,.15),
+                0 10px 26px rgba(0,0,0,.4); }
+  .knob .needle { position:absolute; left:50%; top:50%; width:5px; height:72px;
+    transform-origin:50% 100%; border-radius:3px;
+    background:linear-gradient(var(--lime), var(--teal));
+    box-shadow:0 0 10px rgba(217,237,146,.6); transition:transform .5s cubic-bezier(.2,.8,.2,1); }
+  .knob .knobcap { position:absolute; left:50%; top:50%; width:46px; height:46px;
+    transform:translate(-50%,-50%); border-radius:50%;
+    background:radial-gradient(circle at 40% 35%, #3a6b82, #12303f);
+    border:1px solid #2a5871; box-shadow:inset 0 1px 3px rgba(255,255,255,.15); }
+  .knob .stop { position:absolute; left:50%; top:50%; margin:0; }
+  .knob .stop button { width:34px; height:34px; border-radius:50%; padding:0;
+    font-size:12px; font-weight:800; cursor:pointer; color:var(--text);
+    background:rgba(13,38,56,.7); border:1px solid var(--line); box-shadow:none; }
+  .knob .stop button:hover { transform:translateY(-1px); filter:brightness(1.15); }
+  .knob .stop.active button { background:linear-gradient(180deg,var(--lime),var(--teal));
+    color:#06202a; border-color:var(--lime); box-shadow:0 0 12px rgba(217,237,146,.5); }
+  .knobread { display:flex; flex-direction:column; line-height:1; }
+  .knobread .big { font-size:40px; font-weight:800; color:var(--lime); }
+  .knobread .unit { font-size:14px; color:var(--muted); margin-top:2px; }
+  .knobread .cap { font-size:11px; text-transform:uppercase; letter-spacing:.06em;
+    color:var(--muted); margin-top:10px; }
 </style></head>
 <body><div class="wrap">
   <div class="head"><h1>TradeSim</h1> $mode_badge $enabled_badge $audit_badge</div>
-  <div class="sub">Seed $seed · started at $$${start} · ${floor_note}10-min cron strategy</div>
+  <div class="sub">Seed $seed · started at $$${start} · ${floor_note}auto-rotation strategy</div>
 
   <div class="grid">
     <div class="card"><div class="label">Total Value</div>
@@ -436,6 +516,8 @@ _PAGE = """<!doctype html>
       <button class="ghost">Run cycle now</button></form>
   </div>
 
+  <div class="panel"><p class="chart-title">Cadence — how often it trades</p>$knob</div>
+
   <h2>Latest recommendation</h2>
   $rec_html
   $scan_line
@@ -443,10 +525,10 @@ _PAGE = """<!doctype html>
   <h2>Recent trades</h2>
   <div class="panel" style="padding:8px 14px">
   <table>
-    <thead><tr><th>When</th><th>Side</th><th>Coin</th><th>Qty</th><th>Price</th><th>Cash flow</th><th>P&amp;L</th><th>Mode</th></tr></thead>
+    <thead><tr><th>When</th><th>Side</th><th>Coin</th><th>Qty</th><th>Price</th><th>Cash flow</th><th>Fee</th><th>P&amp;L</th><th>Mode</th></tr></thead>
     <tbody>$trade_rows</tbody>
   </table></div>
-  <p class="muted small">Realized P&amp;L to date: $$${realized}</p>
+  <p class="muted small">Realized P&amp;L to date: $$${realized} · Fees paid to date: $$${fees_total}</p>
 
   <h2>Recommendation history</h2>
   <ul>$rec_rows</ul>
