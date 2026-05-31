@@ -1,6 +1,8 @@
 """FastAPI dashboard: portfolio, P&L, trades, recommendations, and controls
 (kill switch, dry-run/live toggle, run-now). Server-rendered, no build step."""
+import json
 from datetime import datetime, timezone
+from string import Template
 from typing import Optional
 
 from fastapi import FastAPI, Form, Request
@@ -8,7 +10,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 
 from . import config
 from .db import (
-    Portfolio, Recommendation, ScanLog, Settings, Trade,
+    EquitySnapshot, Portfolio, Recommendation, ScanLog, Settings, Trade,
     SessionLocal, get_portfolio, get_settings, init_db,
 )
 from .engine import run_once
@@ -107,26 +109,31 @@ def dashboard(request: Request):
         trades = s.query(Trade).order_by(Trade.id.desc()).limit(25).all()
         last_scan = s.query(ScanLog).order_by(ScanLog.id.desc()).first()
         realized = sum(t.realized_pnl or 0.0 for t in s.query(Trade).all())
+        equity = (
+            s.query(EquitySnapshot).order_by(EquitySnapshot.id.desc()).limit(300).all()
+        )
+        equity = list(reversed(equity))  # oldest-first for the chart
         err = request.query_params.get("err")
-        return HTMLResponse(_render(st, pf, rec, recs, trades, last_scan, realized, err))
+        return HTMLResponse(_render(st, pf, rec, recs, trades, last_scan, realized, equity, err))
 
 
 # ---------- rendering ----------
 
-def _render(st: Settings, pf: Portfolio, rec, recs, trades, last_scan, realized, err: Optional[str] = None) -> str:
+def _render(st: Settings, pf: Portfolio, rec, recs, trades, last_scan, realized,
+            equity, err: Optional[str] = None) -> str:
     total = pf.total_value
     ret = total - st.starting_balance
     ret_pct = (ret / st.starting_balance * 100) if st.starting_balance else 0.0
     holding = pf.pos_base or "USD (cash)"
-    ret_color = "#16c784" if ret >= 0 else "#ea3943"
+    up = ret >= 0
 
     mode_badge = (
-        '<span class="badge live">LIVE</span>' if not st.dry_run
-        else '<span class="badge dry">DRY-RUN</span>'
+        '<span class="badge live">● LIVE</span>' if not st.dry_run
+        else '<span class="badge dry">◐ DRY-RUN</span>'
     )
     enabled_badge = (
-        '<span class="badge on">TRADING ON</span>' if st.enabled
-        else '<span class="badge off">TRADING OFF</span>'
+        '<span class="badge on">▶ TRADING ON</span>' if st.enabled
+        else '<span class="badge off">⏸ TRADING OFF</span>'
     )
     token_field = (
         '<input class="tok" type="password" name="token" placeholder="control token" required>'
@@ -142,29 +149,33 @@ def _render(st: Settings, pf: Portfolio, rec, recs, trades, last_scan, realized,
         if err in err_messages else ""
     )
 
-    # Going to LIVE requires typing the word LIVE; going back to DRY-RUN is one click.
     if st.dry_run:
         dry_run_form = (
             f'<form class="inline" method="post" action="/toggle/dry-run">{token_field}'
             f'<input class="tok" type="text" name="confirm" placeholder="type LIVE" '
             f'autocomplete="off" required>'
-            f'<button class="warn">Switch to LIVE</button></form>'
+            f'<button class="warn">Go LIVE</button></form>'
         )
     else:
         dry_run_form = (
             f'<form class="inline" method="post" action="/toggle/dry-run">{token_field}'
-            f'<button class="ghost">Switch to DRY-RUN</button></form>'
+            f'<button class="ghost">Back to DRY-RUN</button></form>'
         )
 
-    rec_html = "<p class='muted'>No recommendation yet.</p>"
+    # Latest recommendation, with an animated edge meter.
     if rec:
+        edge_w = max(0.0, min(abs(rec.edge_pct) / 15.0, 1.0)) * 100  # scale to 0..100%
         rec_html = (
             f"<div class='rec rec-{rec.action.lower()}'>"
-            f"<span class='action'>{rec.action}</span>"
-            f"<span class='rationale'>{_esc(rec.rationale)}</span>"
-            f"<span class='muted'>edge {rec.edge_pct:+.2f}% · {_ago(rec.ts)}</span>"
+            f"<div class='rec-top'><span class='action'>{rec.action}</span>"
+            f"<span class='edge'>edge {rec.edge_pct:+.2f}%</span></div>"
+            f"<div class='rationale'>{_esc(rec.rationale)}</div>"
+            f"<div class='meter'><span style='width:{edge_w:.0f}%'></span></div>"
+            f"<div class='muted small'>{_ago(rec.ts)}</div>"
             f"</div>"
         )
+    else:
+        rec_html = "<p class='muted'>No recommendation yet.</p>"
 
     trade_rows = "".join(
         f"<tr><td>{_ago(t.ts)}</td><td class='{ 'buy' if t.action=='BUY' else 'sell'}'>{t.action}</td>"
@@ -183,98 +194,277 @@ def _render(st: Settings, pf: Portfolio, rec, recs, trades, last_scan, realized,
     scan_line = ""
     if last_scan:
         scan_line = (
-            f"<p class='muted'>Last scan {_ago(last_scan.ts)} · {last_scan.candidates} candidates"
+            f"<p class='muted small'>Last scan {_ago(last_scan.ts)} · {last_scan.candidates} candidates"
             + (f" · <span class='err'>error: {_esc(last_scan.error)}</span>" if last_scan.error else "")
             + "</p>"
         )
 
     floor_note = (
-        f"Balance floor: ${st.balance_floor_usd:,.2f}. " if st.balance_floor_usd > 0 else ""
+        f"balance floor ${st.balance_floor_usd:,.2f} · " if st.balance_floor_usd > 0 else ""
     )
 
-    return f"""<!doctype html>
+    # Chart data.
+    eq_labels = [e.ts.strftime("%m/%d %H:%M") for e in equity]
+    eq_values = [round(e.total_value, 4) for e in equity]
+    equity_json = json.dumps({"labels": eq_labels, "values": eq_values})
+    alloc_json = json.dumps({
+        "cash": round(pf.cash, 4),
+        "position": round(pf.position_value, 4),
+        "holding": pf.pos_base or "Cash",
+    })
+    baseline_json = json.dumps(round(st.starting_balance, 4))
+
+    ctx = {
+        "seed": config.SEED_BASE,
+        "start": f"{st.starting_balance:,.2f}",
+        "floor_note": floor_note,
+        "mode_badge": mode_badge,
+        "enabled_badge": enabled_badge,
+        "total": f"{total:,.2f}",
+        "total_raw": f"{total:.4f}",
+        "ret": f"{ret:+,.2f}",
+        "ret_pct": f"{ret_pct:+.1f}",
+        "ret_class": "pos" if up else "neg",
+        "holding": _esc(holding),
+        "realized": f"{realized:+,.2f}",
+        "err_banner": err_banner,
+        "dry_run_form": dry_run_form,
+        "token_field": token_field,
+        "enabled_btn_class": "warn" if st.enabled else "go",
+        "enabled_btn_label": "Turn trading OFF" if st.enabled else "Turn trading ON",
+        "rec_html": rec_html,
+        "scan_line": scan_line,
+        "trade_rows": trade_rows,
+        "rec_rows": rec_rows,
+        "equity_json": equity_json,
+        "alloc_json": alloc_json,
+        "baseline_json": baseline_json,
+    }
+    return Template(_PAGE).safe_substitute(ctx)
+
+
+# Palette (coolors): d9ed92 b5e48c 99d98c 76c893 52b69a 34a0a4 168aad 1a759f 1e6091 184e77
+_PAGE = """<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>TradeSim</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
 <style>
-  :root {{ color-scheme: dark; }}
-  * {{ box-sizing: border-box; }}
-  body {{ margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
-         background:#0b0f17; color:#e6e9ef; line-height:1.45; }}
-  .wrap {{ max-width: 860px; margin: 0 auto; padding: 24px 18px 64px; }}
-  h1 {{ font-size: 20px; margin: 0 0 4px; }}
-  .sub {{ color:#8b94a7; font-size: 13px; margin-bottom: 20px; }}
-  .grid {{ display:grid; grid-template-columns: repeat(3,1fr); gap:12px; margin-bottom:20px; }}
-  .card {{ background:#141a26; border:1px solid #1f2838; border-radius:14px; padding:16px; }}
-  .card .label {{ color:#8b94a7; font-size:12px; text-transform:uppercase; letter-spacing:.04em; }}
-  .card .value {{ font-size:22px; font-weight:600; margin-top:4px; }}
-  .badge {{ display:inline-block; padding:3px 9px; border-radius:999px; font-size:11px; font-weight:700;
-           letter-spacing:.03em; }}
-  .badge.live {{ background:#3a1620; color:#ff6b81; }}
-  .badge.dry  {{ background:#14233a; color:#5ac8fa; }}
-  .badge.on   {{ background:#0f2e22; color:#16c784; }}
-  .badge.off  {{ background:#2a2f3a; color:#9aa3b2; }}
-  .controls {{ display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin:10px 0 22px; }}
-  form.inline {{ display:inline-flex; gap:8px; align-items:center; }}
-  button {{ background:#1f6feb; color:#fff; border:0; border-radius:10px; padding:9px 14px;
-           font-size:14px; font-weight:600; cursor:pointer; }}
-  button.ghost {{ background:#202a3a; }}
-  button.warn {{ background:#b4232f; }}
-  .tok {{ background:#0b0f17; border:1px solid #2a3242; color:#e6e9ef; border-radius:8px; padding:8px; }}
-  .rec {{ display:flex; flex-direction:column; gap:4px; padding:14px; border-radius:12px; background:#141a26;
-         border-left:4px solid #5ac8fa; }}
-  .rec .action {{ font-weight:700; }}
-  .rec-enter, .rec-rotate {{ border-left-color:#16c784; }}
-  .rec-exit {{ border-left-color:#f0a13a; }}
-  .rec-hold {{ border-left-color:#5a6678; }}
-  table {{ width:100%; border-collapse:collapse; font-size:13px; }}
-  th,td {{ text-align:left; padding:8px 6px; border-bottom:1px solid #1b2333; }}
-  th {{ color:#8b94a7; font-weight:600; font-size:11px; text-transform:uppercase; }}
-  .buy {{ color:#16c784; font-weight:600; }} .sell {{ color:#ea3943; font-weight:600; }}
-  .muted {{ color:#8b94a7; }} .err {{ color:#ff6b81; }}
-  .banner {{ background:#3a1620; color:#ffb3c0; border:1px solid #5a2230; border-radius:10px;
-            padding:10px 14px; margin-bottom:14px; font-size:13px; }}
-  h2 {{ font-size:14px; text-transform:uppercase; letter-spacing:.04em; color:#8b94a7; margin:26px 0 10px; }}
-  ul {{ padding-left:18px; }} li {{ margin-bottom:6px; font-size:13px; }}
-  .disclaimer {{ margin-top:30px; font-size:12px; color:#6b7587; }}
+  :root {
+    --lime:#d9ed92; --grass:#b5e48c; --leaf:#99d98c; --jade:#76c893; --teal:#52b69a;
+    --aqua:#34a0a4; --sea:#168aad; --ocean:#1a759f; --deep:#1e6091; --navy:#184e77;
+    --bg:#0c2233; --panel:#10314a; --panel2:#0e2a40; --line:#1d4663;
+    --text:#e8f3ee; --muted:#8fb3bf; --pos:#99d98c; --neg:#f4978e;
+    color-scheme: dark;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    color:var(--text); line-height:1.45;
+    background:
+      radial-gradient(1200px 600px at 15% -10%, rgba(82,182,154,.18), transparent 60%),
+      radial-gradient(1000px 500px at 110% 10%, rgba(22,138,173,.20), transparent 55%),
+      var(--bg);
+    min-height:100vh; }
+  .wrap { max-width: 920px; margin:0 auto; padding: 26px 18px 72px; }
+  .head { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+  h1 { font-size:24px; margin:0; font-weight:800; letter-spacing:-.02em;
+    background:linear-gradient(90deg,var(--lime),var(--jade),var(--aqua),var(--sea));
+    background-size:300% 100%; -webkit-background-clip:text; background-clip:text;
+    -webkit-text-fill-color:transparent; animation:shimmer 8s ease infinite; }
+  @keyframes shimmer { 0%{background-position:0% 50%} 50%{background-position:100% 50%} 100%{background-position:0% 50%} }
+  .sub { color:var(--muted); font-size:13px; margin:6px 0 22px; }
+  .badge { display:inline-block; padding:4px 10px; border-radius:999px; font-size:11px; font-weight:800;
+    letter-spacing:.04em; }
+  .badge.live { background:rgba(244,151,142,.16); color:#f4978e; }
+  .badge.dry  { background:rgba(82,182,154,.18); color:var(--leaf); }
+  .badge.on   { background:rgba(153,217,140,.18); color:var(--grass); }
+  .badge.off  { background:rgba(143,179,191,.14); color:var(--muted); }
+  .badge.live { animation:pulse 1.8s ease-in-out infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.55} }
+
+  .grid { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin-bottom:18px; }
+  .card { background:linear-gradient(160deg,var(--panel),var(--panel2));
+    border:1px solid var(--line); border-radius:16px; padding:18px;
+    box-shadow:0 10px 30px rgba(0,0,0,.25); opacity:0; transform:translateY(10px);
+    animation:rise .6s cubic-bezier(.2,.7,.2,1) forwards; }
+  .card:nth-child(2){ animation-delay:.08s } .card:nth-child(3){ animation-delay:.16s }
+  @keyframes rise { to { opacity:1; transform:none } }
+  .card .label { color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.06em; }
+  .card .value { font-size:26px; font-weight:800; margin-top:6px; letter-spacing:-.01em; }
+  .value.pos { color:var(--pos); } .value.neg { color:var(--neg); }
+  .holding-chip { display:inline-block; margin-top:6px; font-size:18px; font-weight:700; }
+
+  .panel { background:linear-gradient(160deg,var(--panel),var(--panel2));
+    border:1px solid var(--line); border-radius:16px; padding:18px; margin-bottom:18px;
+    box-shadow:0 10px 30px rgba(0,0,0,.22);
+    opacity:0; transform:translateY(10px); animation:rise .6s ease forwards .12s; }
+  .charts { display:grid; grid-template-columns:2fr 1fr; gap:14px; }
+  @media (max-width:640px){ .charts{ grid-template-columns:1fr } .grid{ grid-template-columns:1fr } }
+  .chart-title { font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); margin:0 0 10px; }
+  canvas { width:100% !important; }
+
+  .controls { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin:6px 0 20px; }
+  form.inline { display:inline-flex; gap:8px; align-items:center; }
+  button { color:#06202a; border:0; border-radius:11px; padding:10px 15px; font-size:14px; font-weight:700;
+    cursor:pointer; transition:transform .12s ease, box-shadow .12s ease, filter .12s ease;
+    background:linear-gradient(180deg,var(--leaf),var(--teal)); box-shadow:0 6px 16px rgba(82,182,154,.25); }
+  button:hover { transform:translateY(-1px); filter:brightness(1.05); box-shadow:0 10px 22px rgba(82,182,154,.35); }
+  button.ghost { background:rgba(143,179,191,.12); color:var(--text); box-shadow:none; border:1px solid var(--line); }
+  button.go { background:linear-gradient(180deg,var(--grass),var(--jade)); }
+  button.warn { background:linear-gradient(180deg,#f4978e,#e5675b); color:#2a0d0a; box-shadow:0 6px 16px rgba(229,103,91,.3); }
+  .tok { background:var(--bg); border:1px solid var(--line); color:var(--text); border-radius:9px; padding:9px; }
+
+  .rec { padding:16px; border-radius:14px; background:var(--panel2); border-left:4px solid var(--teal);
+    box-shadow:0 8px 20px rgba(0,0,0,.2); }
+  .rec-top { display:flex; justify-content:space-between; align-items:center; }
+  .rec .action { font-weight:800; letter-spacing:.03em; }
+  .rec .edge { font-variant-numeric:tabular-nums; color:var(--muted); font-size:13px; }
+  .rec .rationale { margin:8px 0; font-size:14px; }
+  .rec-enter, .rec-rotate { border-left-color:var(--grass); }
+  .rec-exit { border-left-color:#f4b16e; }
+  .rec-hold { border-left-color:var(--ocean); }
+  .meter { height:6px; border-radius:999px; background:rgba(255,255,255,.08); overflow:hidden; }
+  .meter > span { display:block; height:100%; width:0;
+    background:linear-gradient(90deg,var(--teal),var(--lime));
+    animation:fill 1s cubic-bezier(.2,.7,.2,1) forwards .2s; }
+  @keyframes fill { from{ width:0 } }
+
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th,td { text-align:left; padding:9px 6px; border-bottom:1px solid var(--line); font-variant-numeric:tabular-nums; }
+  th { color:var(--muted); font-weight:700; font-size:11px; text-transform:uppercase; letter-spacing:.04em; }
+  tbody tr { transition:background .12s ease; } tbody tr:hover { background:rgba(82,182,154,.07); }
+  .buy { color:var(--grass); font-weight:700; } .sell { color:var(--neg); font-weight:700; }
+  .muted { color:var(--muted); } .small { font-size:12px; } .err { color:var(--neg); }
+  .banner { background:rgba(244,151,142,.14); color:#ffd0c9; border:1px solid rgba(244,151,142,.35);
+    border-radius:12px; padding:11px 14px; margin-bottom:14px; font-size:13px; }
+  h2 { font-size:13px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); margin:26px 0 10px; }
+  ul { padding-left:18px; } li { margin-bottom:6px; font-size:13px; }
+  .disclaimer { margin-top:30px; font-size:12px; color:var(--muted); opacity:.8; }
 </style></head>
 <body><div class="wrap">
-  <h1>TradeSim {mode_badge} {enabled_badge}</h1>
-  <div class="sub">Seed {config.SEED_BASE} · started at ${st.starting_balance:,.2f} · {floor_note}10-min cron strategy</div>
+  <div class="head"><h1>TradeSim</h1> $mode_badge $enabled_badge</div>
+  <div class="sub">Seed $seed · started at $$${start} · ${floor_note}10-min cron strategy</div>
 
   <div class="grid">
-    <div class="card"><div class="label">Total Value</div><div class="value">${total:,.2f}</div></div>
+    <div class="card"><div class="label">Total Value</div>
+      <div class="value" data-countup="$total_raw" data-prefix="1">$$${total}</div></div>
     <div class="card"><div class="label">Total Return</div>
-      <div class="value" style="color:{ret_color}">${ret:+,.2f} ({ret_pct:+.1f}%)</div></div>
-    <div class="card"><div class="label">Holding</div><div class="value">{_esc(holding)}</div></div>
+      <div class="value $ret_class">$$${ret} <span class="small">($ret_pct%)</span></div></div>
+    <div class="card"><div class="label">Holding</div>
+      <div class="holding-chip">$holding</div></div>
   </div>
 
-  {err_banner}
+  <div class="panel charts">
+    <div>
+      <p class="chart-title">Portfolio value</p>
+      <canvas id="equity" height="220"></canvas>
+    </div>
+    <div>
+      <p class="chart-title">Allocation</p>
+      <canvas id="alloc" height="220"></canvas>
+    </div>
+  </div>
+
+  $err_banner
   <div class="controls">
-    <form class="inline" method="post" action="/toggle/enabled">{token_field}
-      <button class="{ 'warn' if st.enabled else ''}">{ 'Turn trading OFF' if st.enabled else 'Turn trading ON'}</button></form>
-    {dry_run_form}
-    <form class="inline" method="post" action="/run-now">{token_field}
+    <form class="inline" method="post" action="/toggle/enabled">$token_field
+      <button class="$enabled_btn_class">$enabled_btn_label</button></form>
+    $dry_run_form
+    <form class="inline" method="post" action="/run-now">$token_field
       <button class="ghost">Run cycle now</button></form>
   </div>
 
   <h2>Latest recommendation</h2>
-  {rec_html}
-  {scan_line}
+  $rec_html
+  $scan_line
 
   <h2>Recent trades</h2>
+  <div class="panel" style="padding:8px 14px">
   <table>
     <thead><tr><th>When</th><th>Side</th><th>Coin</th><th>Qty</th><th>Price</th><th>Cash flow</th><th>P&amp;L</th><th>Mode</th></tr></thead>
-    <tbody>{trade_rows}</tbody>
-  </table>
-  <p class="muted" style="margin-top:8px">Realized P&amp;L to date: ${realized:+,.2f}</p>
+    <tbody>$trade_rows</tbody>
+  </table></div>
+  <p class="muted small">Realized P&amp;L to date: $$${realized}</p>
 
   <h2>Recommendation history</h2>
-  <ul>{rec_rows}</ul>
+  <ul>$rec_rows</ul>
 
   <p class="disclaimer">Personal paper/auto-trading tool. Not financial advice.
   In DRY-RUN no real orders are placed. In LIVE, orders execute on Coinbase with a Trade-scoped key.</p>
-</div></body></html>"""
+</div>
+
+<script>
+const EQUITY = $equity_json;
+const ALLOC = $alloc_json;
+const BASELINE = $baseline_json;
+const D = String.fromCharCode(36); // dollar sign
+const P = { lime:'#d9ed92', leaf:'#99d98c', jade:'#76c893', teal:'#52b69a',
+            aqua:'#34a0a4', sea:'#168aad', ocean:'#1a759f', muted:'#8fb3bf' };
+
+// Animated count-up for the Total Value stat.
+document.querySelectorAll('[data-countup]').forEach(function(el){
+  const target = parseFloat(el.getAttribute('data-countup')) || 0;
+  const pre = el.getAttribute('data-prefix') ? D : '';
+  const dur = 900; const t0 = performance.now();
+  function fmt(n){ return n.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}); }
+  function step(now){
+    const k = Math.min((now - t0)/dur, 1);
+    const e = 1 - Math.pow(1 - k, 3);
+    el.textContent = pre + fmt(target * e);
+    if (k < 1) requestAnimationFrame(step);
+  }
+  requestAnimationFrame(step);
+});
+
+if (window.Chart) {
+  Chart.defaults.color = P.muted;
+  Chart.defaults.font.family = '-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif';
+
+  // Equity curve with a teal->lime gradient fill.
+  const ec = document.getElementById('equity').getContext('2d');
+  const grad = ec.createLinearGradient(0, 0, 0, 220);
+  grad.addColorStop(0, 'rgba(82,182,154,0.45)');
+  grad.addColorStop(1, 'rgba(82,182,154,0.02)');
+  const hasData = EQUITY.values.length > 0;
+  new Chart(ec, {
+    type: 'line',
+    data: { labels: hasData ? EQUITY.labels : ['start'],
+      datasets: [{
+        data: hasData ? EQUITY.values : [BASELINE],
+        borderColor: P.lime, borderWidth: 2.5, fill: true, backgroundColor: grad,
+        tension: 0.35, pointRadius: 0, pointHoverRadius: 4, pointHoverBackgroundColor: P.lime,
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      animation: { duration: 1100, easing: 'easeOutCubic' },
+      interaction: { intersect: false, mode: 'index' },
+      plugins: { legend: { display: false },
+        tooltip: { callbacks: { label: function(c){ return D + c.parsed.y.toFixed(2); } } } },
+      scales: {
+        x: { grid: { display: false }, ticks: { maxTicksLimit: 6 } },
+        y: { grid: { color: 'rgba(143,179,191,0.10)' },
+             ticks: { callback: function(v){ return D + v.toFixed(2); } } }
+      }
+    }
+  });
+
+  // Allocation doughnut: cash vs current position.
+  const acx = document.getElementById('alloc').getContext('2d');
+  new Chart(acx, {
+    type: 'doughnut',
+    data: { labels: ['Cash', ALLOC.holding],
+      datasets: [{ data: [ALLOC.cash, ALLOC.position],
+        backgroundColor: [P.sea, P.jade], borderColor: 'rgba(0,0,0,0)', borderWidth: 0,
+        hoverOffset: 6 }] },
+    options: { responsive: true, maintainAspectRatio: false, cutout: '66%',
+      animation: { animateRotate: true, duration: 1100 },
+      plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, padding: 14 } },
+        tooltip: { callbacks: { label: function(c){ return c.label + ': ' + D + c.parsed.toFixed(2); } } } } }
+  });
+}
+</script>
+</body></html>"""
 
 
 def _rec_dict(r):

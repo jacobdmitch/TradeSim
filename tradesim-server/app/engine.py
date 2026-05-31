@@ -12,7 +12,7 @@ from typing import List, Optional
 from . import config, market
 from .broker import Broker, TradeResult
 from .db import (
-    Portfolio, Recommendation, ScanLog, Settings, SessionLocal,
+    EquitySnapshot, Portfolio, Recommendation, ScanLog, Settings, SessionLocal,
     get_portfolio, get_settings, init_db,
 )
 from .predictor import CoinScore, Predictor, Recommendation as Rec, select_candidates
@@ -105,6 +105,10 @@ def run_once() -> CycleResult:
 
         note = " ".join(note_parts)
         session.add(ScanLog(candidates=len(scored), note=note))
+        session.add(EquitySnapshot(
+            total_value=pf.total_value, cash=pf.cash,
+            position_value=pf.position_value, holding=pf.pos_base or "USD",
+        ))
         session.commit()
         return CycleResult(True, rec, executed, len(scored), note)
 

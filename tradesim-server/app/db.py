@@ -107,6 +107,17 @@ class ScanLog(Base):
     error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
 
+class EquitySnapshot(Base):
+    """Total portfolio value captured each cycle, for the equity curve chart."""
+    __tablename__ = "equity"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    total_value: Mapped[float] = mapped_column(Float)
+    cash: Mapped[float] = mapped_column(Float, default=0.0)
+    position_value: Mapped[float] = mapped_column(Float, default=0.0)
+    holding: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+
+
 def init_db() -> None:
     """Create tables and seed the singleton control rows if missing."""
     Base.metadata.create_all(ENGINE)
