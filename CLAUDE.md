@@ -1,0 +1,76 @@
+# CLAUDE.md
+
+Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-specific instructions as needed.
+
+**Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.
+
+## 1. Think Before Coding
+
+**Don't assume. Don't hide confusion. Surface tradeoffs.**
+
+Before implementing:
+- State your assumptions explicitly. If uncertain, ask.
+- If multiple interpretations exist, present them - don't pick silently.
+- If a simpler approach exists, say so. Push back when warranted.
+- If something is unclear, stop. Name what's confusing. Ask.
+
+## 2. Simplicity First
+
+**Minimum code that solves the problem. Nothing speculative.**
+
+- No features beyond what was asked.
+- No abstractions for single-use code.
+- No "flexibility" or "configurability" that wasn't requested.
+- No error handling for impossible scenarios.
+- If you write 200 lines and it could be 50, rewrite it.
+
+Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
+
+Make sure changes enhance the end user experience. If a change looks like it will complicate a process or hurt the user experience, ask for clarification and offer alternative suggestions.
+
+## 3. Surgical Changes
+
+**Touch only what you must. Clean up only your own mess.**
+
+When editing existing code:
+- Don't "improve" adjacent code, comments, or formatting.
+- Don't refactor things that aren't broken.
+- Match existing style, even if you'd do it differently.
+- If you notice unrelated dead code, mention it - don't delete it.
+- If you are fixing a bug and find the same bug in other parts of the code, alert the user and ask about fixing it. 
+When your changes create orphans:
+- Remove imports/variables/functions that YOUR changes made unused.
+- Flag and alert the user to pre-existing dead code.
+
+The test: Every changed line should trace directly to the user's request.
+
+## 4. Goal-Driven Execution
+
+**Define success criteria. Loop until verified.**
+
+Transform tasks into verifiable goals:
+- "Add validation" â†’ "Write tests for invalid inputs, then make them pass"
+- "Fix the bug" â†’ "Write a test that reproduces it, then make it pass"
+- "Refactor X" â†’ "Ensure tests pass before and after"
+
+For multi-step tasks, state a brief plan:
+```
+1. [Step] â†’ verify: [check]
+2. [Step] â†’ verify: [check]
+3. [Step] â†’ verify: [check]
+```
+
+Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
+
+## 5. Finishing Tasks
+**Clean up items and update reference materials**
+
+Clean up any loose references or paths to old code
+
+If any user facing updates were made, search for corresponding reference material such as userguides, help documents etc and update them to reflect the new app state. Remove any old or incorrect reference material made from your code changes
+
+Update all i18n references, and create new translations for all supported languages if needed
+
+Create a commit summary and description for every commit group
+ 
+---
