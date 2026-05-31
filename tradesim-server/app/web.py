@@ -495,6 +495,13 @@ _PAGE = """<!doctype html>
        line instead of scrolling sideways. */
     th,td{ padding:7px 5px; font-size:11px; }
     .tradespanel{ padding:12px; }
+    /* On phones only: bound to ~10 rows and scroll vertically (sticky header).
+       The panel keeps non-scrolling side gutters so swiping the edges scrolls
+       the whole page rather than the inner table. */
+    .tscroll{ max-height:24rem; overflow-y:auto; overflow-x:hidden;
+      -webkit-overflow-scrolling:touch; }
+    .tscroll thead th{ position:sticky; top:0; background:var(--panel2);
+      box-shadow:inset 0 -1px 0 var(--line); z-index:2; }
     /* Controls become full-width, comfortably tappable rows. */
     .controls{ gap:8px; }
     .controls form.inline, .controls button{ width:100%; }
@@ -537,14 +544,7 @@ _PAGE = """<!doctype html>
   th,td { text-align:left; padding:9px 6px; border-bottom:1px solid var(--line); font-variant-numeric:tabular-nums; }
   th { color:var(--muted); font-weight:700; font-size:11px; text-transform:uppercase; letter-spacing:.04em; }
   tbody tr { transition:background .12s ease; } tbody tr:hover { background:rgba(82,182,154,.07); }
-  /* Recent-trades list: bound to ~10 rows and scroll vertically (sticky header).
-     The panel keeps wide side padding that doesn't scroll, so swiping the
-     gutters scrolls the whole page rather than the inner table. */
   .tradespanel { padding:14px 20px; }
-  .tscroll { max-height:24rem; overflow-y:auto; overflow-x:hidden;
-    -webkit-overflow-scrolling:touch; }
-  .tscroll thead th { position:sticky; top:0; background:var(--panel2);
-    box-shadow:inset 0 -1px 0 var(--line); z-index:2; }
   .buy { color:var(--grass); font-weight:700; } .sell { color:var(--neg); font-weight:700; }
   .muted { color:var(--muted); } .small { font-size:12px; } .err { color:var(--neg); }
   .banner { background:rgba(244,151,142,.14); color:#ffd0c9; border:1px solid rgba(244,151,142,.35);
