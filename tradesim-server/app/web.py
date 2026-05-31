@@ -285,7 +285,7 @@ _PAGE = """<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>TradeSim</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <style>
   :root {
     --lime:#d9ed92; --grass:#b5e48c; --leaf:#99d98c; --jade:#76c893; --teal:#52b69a;
@@ -459,6 +459,11 @@ document.querySelectorAll('[data-countup]').forEach(function(el){
   requestAnimationFrame(step);
 });
 
+if (!window.Chart) {
+  document.querySelectorAll('.cbox').forEach(function(b){
+    b.innerHTML = '<p class="muted small">Charts unavailable (Chart.js failed to load).</p>';
+  });
+}
 if (window.Chart) {
   Chart.defaults.color = P.muted;
   Chart.defaults.font.family = '-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif';
