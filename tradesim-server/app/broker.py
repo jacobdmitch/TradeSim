@@ -33,6 +33,15 @@ class TradeResult:
     order_id: Optional[str] = None
 
 
+@dataclass
+class ConvertQuote:
+    trade_id: str
+    from_currency: str
+    to_currency: str
+    from_qty: float        # source consumed
+    to_qty: float          # target received (after Coinbase's spread + fee)
+
+
 class BrokerError(Exception):
     pass
 
@@ -54,6 +63,87 @@ class Broker:
             )
         from coinbase.rest import RESTClient  # imported lazily so dry-run needs no creds
         return RESTClient(api_key=config.COINBASE_API_KEY, api_secret=config.COINBASE_API_SECRET)
+
+    # ---- Live account balances (real funds) ----
+    def balances(self) -> dict:
+        """Map of currency -> available balance from the live Coinbase account.
+        Live only; raises if the client/call fails (caller decides what to do)."""
+        if self._client is None:
+            raise BrokerError("balances() requires live mode")
+        resp = self._client.get_accounts(limit=250)
+        accounts = _g(resp, "accounts") or (resp.get("accounts") if isinstance(resp, dict) else None) or []
+        out: dict = {}
+        for a in accounts:
+            cur = _g(a, "currency")
+            ab = _g(a, "available_balance") or {}
+            val = _g(ab, "value")
+            if cur is not None and val is not None:
+                out[cur] = _f(val)
+        return out
+
+    def usd_balance(self) -> float:
+        return self.balances().get("USD", 0.0)
+
+    def asset_balance(self, base: str) -> float:
+        return self.balances().get(base, 0.0)
+
+    def _accounts(self) -> list:
+        resp = self._client.get_accounts(limit=250)
+        return _g(resp, "accounts") or (resp.get("accounts") if isinstance(resp, dict) else None) or []
+
+    def _account_uuid(self, currency: str) -> Optional[str]:
+        for a in self._accounts():
+            if _g(a, "currency") == currency:
+                return _g(a, "uuid") or _g(a, "account_uuid")
+        return None
+
+    # ---- Convert (single-step coin->coin), used only when it beats two legs ----
+    def convert_quote(self, from_currency: str, to_currency: str, from_amount: float) -> Optional[ConvertQuote]:
+        """Request a non-committal Convert quote. Returns None if unavailable or
+        unparseable, so the caller can fall back to two-leg order-book trading."""
+        if self._client is None:
+            return None
+        try:
+            from_uuid = self._account_uuid(from_currency)
+            to_uuid = self._account_uuid(to_currency)
+            if not from_uuid or not to_uuid:
+                return None
+            resp = self._client.create_convert_quote(
+                from_account=from_uuid, to_account=to_uuid, amount=str(from_amount))
+            trade = _g(resp, "trade") or (resp.get("trade") if isinstance(resp, dict) else None) or resp
+            trade_id = _g(trade, "id") or _g(trade, "trade_id")
+            from_amt = _amt(_g(trade, "user_entered_amount")) or _amt(_g(trade, "from_amount")) or from_amount
+            to_amt = _amt(_g(trade, "to_amount")) or _amt(_g(trade, "amount"))
+            if not trade_id or not to_amt or to_amt <= 0:
+                return None
+            return ConvertQuote(trade_id=trade_id, from_currency=from_currency,
+                                to_currency=to_currency, from_qty=from_amt or from_amount, to_qty=to_amt)
+        except Exception:  # noqa: BLE001 - any issue => no convert, fall back
+            return None
+
+    def convert_commit(self, quote: ConvertQuote) -> Optional[float]:
+        """Commit a previously fetched Convert quote. Returns the target qty
+        actually received, or None on failure (caller must reconcile/fall back)."""
+        if self._client is None:
+            return None
+        try:
+            from_uuid = self._account_uuid(quote.from_currency)
+            to_uuid = self._account_uuid(quote.to_currency)
+            self._client.commit_convert_trade(
+                trade_id=quote.trade_id, from_account=from_uuid, to_account=to_uuid)
+            # Confirm and read the realized target amount.
+            for _ in range(6):
+                resp = self._client.get_convert_trade(
+                    trade_id=quote.trade_id, from_account=from_uuid, to_account=to_uuid)
+                trade = _g(resp, "trade") or (resp.get("trade") if isinstance(resp, dict) else None) or resp
+                status = (_g(trade, "status") or "").upper()
+                to_amt = _amt(_g(trade, "to_amount")) or _amt(_g(trade, "amount"))
+                if status in {"COMPLETED", "DONE", "SETTLED", "TRADE_STATUS_COMPLETED"} and to_amt:
+                    return to_amt
+                time.sleep(1.0)
+            return None
+        except Exception:  # noqa: BLE001
+            return None
 
     # ---- Seeding (models coins already owned; no fee) ----
     def seed(self, pf: Portfolio, base: str, product_id: str, usd_value: float, price: float) -> None:
@@ -214,3 +304,13 @@ def _f(v) -> float:
         return float(v)
     except (TypeError, ValueError):
         return 0.0
+
+
+def _amt(v) -> float:
+    """Extract a numeric amount from a Coinbase money field, which may be a
+    scalar, a string, or a {'value': '...', 'currency': '...'} object."""
+    if v is None:
+        return 0.0
+    if isinstance(v, (int, float, str)):
+        return _f(v)
+    return _f(_g(v, "value"))

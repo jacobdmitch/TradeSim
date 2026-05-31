@@ -10,7 +10,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 
 from . import config
 from .db import (
-    EquitySnapshot, Portfolio, Recommendation, ScanLog, Settings, Trade,
+    AuditLog, EquitySnapshot, Portfolio, Recommendation, ScanLog, Settings, Trade,
     SessionLocal, get_portfolio, get_settings, init_db,
 )
 from .engine import run_once
@@ -99,6 +99,17 @@ def toggle_dry_run(token: Optional[str] = Form(default=None), confirm: Optional[
     return RedirectResponse("/", status_code=303)
 
 
+@app.post("/toggle/audit")
+def toggle_audit(token: Optional[str] = Form(default=None)):
+    if not _authorized(token):
+        return RedirectResponse("/?err=auth", status_code=303)
+    with SessionLocal() as s:
+        st = get_settings(s)
+        st.audit_enabled = not st.audit_enabled
+        s.commit()
+    return RedirectResponse("/", status_code=303)
+
+
 @app.get("/", response_class=HTMLResponse)
 def dashboard(request: Request):
     with SessionLocal() as s:
@@ -113,14 +124,17 @@ def dashboard(request: Request):
             s.query(EquitySnapshot).order_by(EquitySnapshot.id.desc()).limit(300).all()
         )
         equity = list(reversed(equity))  # oldest-first for the chart
+        audits = s.query(AuditLog).order_by(AuditLog.id.desc()).limit(8).all()
         err = request.query_params.get("err")
-        return HTMLResponse(_render(st, pf, rec, recs, trades, last_scan, realized, equity, err))
+        return HTMLResponse(
+            _render(st, pf, rec, recs, trades, last_scan, realized, equity, audits, err)
+        )
 
 
 # ---------- rendering ----------
 
 def _render(st: Settings, pf: Portfolio, rec, recs, trades, last_scan, realized,
-            equity, err: Optional[str] = None) -> str:
+            equity, audits, err: Optional[str] = None) -> str:
     total = pf.total_value
     ret = total - st.starting_balance
     ret_pct = (ret / st.starting_balance * 100) if st.starting_balance else 0.0
@@ -134,6 +148,11 @@ def _render(st: Settings, pf: Portfolio, rec, recs, trades, last_scan, realized,
     enabled_badge = (
         '<span class="badge on">▶ TRADING ON</span>' if st.enabled
         else '<span class="badge off">⏸ TRADING OFF</span>'
+    )
+    audit_on = getattr(st, "audit_enabled", False)
+    audit_badge = (
+        '<span class="badge audit">✦ AI AUDIT ON</span>' if audit_on
+        else '<span class="badge off">AI AUDIT OFF</span>'
     )
     token_field = (
         '<input class="tok" type="password" name="token" placeholder="control token" required>'
@@ -203,6 +222,21 @@ def _render(st: Settings, pf: Portfolio, rec, recs, trades, last_scan, realized,
         f"balance floor ${st.balance_floor_usd:,.2f} · " if st.balance_floor_usd > 0 else ""
     )
 
+    audit_form = (
+        f'<form class="inline" method="post" action="/toggle/audit">{token_field}'
+        f'<button class="ghost">{"Disable AI audit" if audit_on else "Enable AI audit"}</button></form>'
+    )
+    if audits:
+        audit_rows = "".join(
+            f"<li><b class='{ 'veto' if a.verdict=='VETO' else 'buy'}'>{a.verdict}</b> "
+            f"{a.action}{(' → ' + _esc(a.to_base)) if a.to_base else ''} — {_esc(a.reason)} "
+            f"<span class='muted'>({_ago(a.ts)})</span></li>"
+            for a in audits
+        )
+        audit_section = f"<h2>AI audit log</h2><ul>{audit_rows}</ul>"
+    else:
+        audit_section = ""
+
     # Chart data.
     eq_labels = [e.ts.strftime("%m/%d %H:%M") for e in equity]
     eq_values = [round(e.total_value, 4) for e in equity]
@@ -220,6 +254,9 @@ def _render(st: Settings, pf: Portfolio, rec, recs, trades, last_scan, realized,
         "floor_note": floor_note,
         "mode_badge": mode_badge,
         "enabled_badge": enabled_badge,
+        "audit_badge": audit_badge,
+        "audit_form": audit_form,
+        "audit_section": audit_section,
         "total": f"{total:,.2f}",
         "total_raw": f"{total:.4f}",
         "ret": f"{ret:+,.2f}",
@@ -279,6 +316,8 @@ _PAGE = """<!doctype html>
   .badge.dry  { background:rgba(82,182,154,.18); color:var(--leaf); }
   .badge.on   { background:rgba(153,217,140,.18); color:var(--grass); }
   .badge.off  { background:rgba(143,179,191,.14); color:var(--muted); }
+  .badge.audit { background:rgba(52,160,164,.20); color:var(--aqua); }
+  .veto { color:#f4978e; font-weight:700; }
   .badge.live { animation:pulse 1.8s ease-in-out infinite; }
   @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.55} }
 
@@ -301,7 +340,8 @@ _PAGE = """<!doctype html>
   .charts { display:grid; grid-template-columns:2fr 1fr; gap:14px; }
   @media (max-width:640px){ .charts{ grid-template-columns:1fr } .grid{ grid-template-columns:1fr } }
   .chart-title { font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); margin:0 0 10px; }
-  canvas { width:100% !important; }
+  .cbox { position:relative; height:240px; }
+  .cbox canvas { position:absolute; inset:0; }
 
   .controls { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin:6px 0 20px; }
   form.inline { display:inline-flex; gap:8px; align-items:center; }
@@ -342,7 +382,7 @@ _PAGE = """<!doctype html>
   .disclaimer { margin-top:30px; font-size:12px; color:var(--muted); opacity:.8; }
 </style></head>
 <body><div class="wrap">
-  <div class="head"><h1>TradeSim</h1> $mode_badge $enabled_badge</div>
+  <div class="head"><h1>TradeSim</h1> $mode_badge $enabled_badge $audit_badge</div>
   <div class="sub">Seed $seed · started at $$${start} · ${floor_note}10-min cron strategy</div>
 
   <div class="grid">
@@ -357,11 +397,11 @@ _PAGE = """<!doctype html>
   <div class="panel charts">
     <div>
       <p class="chart-title">Portfolio value</p>
-      <canvas id="equity" height="220"></canvas>
+      <div class="cbox"><canvas id="equity"></canvas></div>
     </div>
     <div>
       <p class="chart-title">Allocation</p>
-      <canvas id="alloc" height="220"></canvas>
+      <div class="cbox"><canvas id="alloc"></canvas></div>
     </div>
   </div>
 
@@ -370,6 +410,7 @@ _PAGE = """<!doctype html>
     <form class="inline" method="post" action="/toggle/enabled">$token_field
       <button class="$enabled_btn_class">$enabled_btn_label</button></form>
     $dry_run_form
+    $audit_form
     <form class="inline" method="post" action="/run-now">$token_field
       <button class="ghost">Run cycle now</button></form>
   </div>
@@ -388,6 +429,8 @@ _PAGE = """<!doctype html>
 
   <h2>Recommendation history</h2>
   <ul>$rec_rows</ul>
+
+  $audit_section
 
   <p class="disclaimer">Personal paper/auto-trading tool. Not financial advice.
   In DRY-RUN no real orders are placed. In LIVE, orders execute on Coinbase with a Trade-scoped key.</p>

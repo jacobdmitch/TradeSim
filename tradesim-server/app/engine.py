@@ -9,10 +9,10 @@ import logging
 from dataclasses import dataclass
 from typing import List, Optional
 
-from . import config, market
+from . import auditor, config, market
 from .broker import Broker, TradeResult
 from .db import (
-    EquitySnapshot, Portfolio, Recommendation, ScanLog, Settings, SessionLocal,
+    AuditLog, EquitySnapshot, Portfolio, Recommendation, ScanLog, Settings, SessionLocal,
     get_portfolio, get_settings, init_db,
 )
 from .predictor import CoinScore, Predictor, Recommendation as Rec, select_candidates
@@ -48,18 +48,21 @@ def run_once() -> CycleResult:
             raise RuntimeError("No market stats returned.")
 
         stats_by_base = {s.base: s for s in stats}
-
-        # Mark current position to the latest price.
-        if pf.has_position and pf.pos_base in stats_by_base:
-            pf.pos_mark_price = stats_by_base[pf.pos_base].last
-
-        # Seed the starting DIMO holding once.
         broker = Broker(dry_run=settings.dry_run)
-        if not settings.seeded and config.SEED_BASE in stats_by_base:
-            seed_stat = stats_by_base[config.SEED_BASE]
-            broker.seed(pf, config.SEED_BASE, seed_stat.product_id,
-                        settings.starting_balance, seed_stat.last)
-            settings.seeded = True
+
+        if settings.dry_run:
+            # Paper mode: mark to last price, seed the modeled starting stake once.
+            if pf.has_position and pf.pos_base in stats_by_base:
+                pf.pos_mark_price = stats_by_base[pf.pos_base].last
+            if not settings.seeded and config.SEED_BASE in stats_by_base:
+                seed_stat = stats_by_base[config.SEED_BASE]
+                broker.seed(pf, config.SEED_BASE, seed_stat.product_id,
+                            settings.starting_balance, seed_stat.last)
+                settings.seeded = True
+        else:
+            # LIVE mode: trust the real Coinbase account, not modeled values.
+            # If balances can't be read, abort the cycle rather than trade blind.
+            _reconcile_live(broker, pf, settings, stats_by_base)
 
         # Candidates -> deep analysis on those with enough candles.
         candidates = select_candidates(stats, rotation, config.MIN_LIQUIDITY_USD,
@@ -98,8 +101,13 @@ def run_once() -> CycleResult:
         if rec.action != "HOLD":
             allowed, reason = _execution_allowed(settings, pf, rec)
             if allowed and changed:
-                executed = _execute(broker, rec, pf, stats_by_base, session, settings)
-                note_parts.append(f"executed={[t.action for t in executed]}")
+                # Optional Claude pre-trade audit (veto-only, fail-open).
+                audit_res = _run_audit(rec, ranked, pf, stats_by_base, settings, session)
+                if audit_res is not None and audit_res.used and not audit_res.approved:
+                    note_parts.append(f"audit_veto:{audit_res.reason[:80]}")
+                else:
+                    executed = _execute(broker, rec, pf, stats_by_base, session, settings)
+                    note_parts.append(f"executed={[t.action for t in executed]}")
             else:
                 note_parts.append(f"not_executed:{reason}")
 
@@ -123,6 +131,92 @@ def run_once() -> CycleResult:
         return CycleResult(False, None, [], 0, "error", str(e))
     finally:
         session.close()
+
+
+def _reconcile_live(broker: Broker, pf: Portfolio, settings: Settings, stats_by_base) -> None:
+    """LIVE only: overwrite the portfolio bookkeeping with the actual Coinbase
+    balances so trade sizing, account value, and P&L reflect real funds — never
+    the modeled $seed. Raises on balance-read failure so the cycle aborts instead
+    of trading on stale numbers."""
+    try:
+        bals = broker.balances()
+    except Exception as e:  # noqa: BLE001
+        raise RuntimeError(f"live balance read failed; skipping cycle: {e}")
+
+    pf.cash = bals.get("USD", 0.0)
+
+    # First live cycle: adopt whatever the account actually holds (your DIMO),
+    # and anchor the return baseline to that real starting value.
+    if not settings.seeded:
+        seed_qty = bals.get(config.SEED_BASE, 0.0)
+        st = stats_by_base.get(config.SEED_BASE)
+        if seed_qty > 0 and st and st.last > 0:
+            pf.pos_base = config.SEED_BASE
+            pf.pos_product_id = st.product_id
+            pf.pos_quantity = seed_qty
+            pf.pos_mark_price = st.last
+            pf.pos_cost_basis_usd = seed_qty * st.last  # basis = value at takeover (PnL starts at 0)
+        settings.seeded = True
+        settings.starting_balance = pf.total_value  # real baseline for return %
+
+    # Reconcile the tracked position to the real on-exchange balance + price.
+    if pf.pos_base:
+        real_qty = bals.get(pf.pos_base, 0.0)
+        st = stats_by_base.get(pf.pos_base)
+        if st:
+            pf.pos_mark_price = st.last
+        if real_qty > 0:
+            pf.pos_quantity = real_qty
+        else:
+            # Position no longer on the exchange — treat as cash only.
+            pf.pos_base = None
+            pf.pos_product_id = None
+            pf.pos_quantity = 0.0
+            pf.pos_cost_basis_usd = 0.0
+            pf.pos_mark_price = 0.0
+
+
+def _run_audit(rec: Rec, ranked: List[CoinScore], pf: Portfolio, stats_by_base,
+               settings: Settings, session):
+    """Run the optional Claude audit and log the verdict. Returns AuditResult or None."""
+    if not getattr(settings, "audit_enabled", False):
+        return None
+
+    def score_for(base):
+        return next((s for s in ranked if s.base == base), None)
+
+    def snap(base):
+        sc = score_for(base)
+        st = stats_by_base.get(base)
+        if not st:
+            return None
+        return {
+            "base": base,
+            "price": round(st.last, 8),
+            "change_24h_pct": round(st.change_pct, 2),
+            "volume_usd_24h": round(st.volume_usd, 0),
+            "momentum_pct": round(sc.momentum, 2) if sc else None,
+            "rsi": round(sc.rsi, 1) if sc and sc.rsi is not None else None,
+            "trend_up": sc.trend_up if sc else None,
+            "predicted_edge_pct": round(sc.predicted_edge_pct, 2) if sc else None,
+        }
+
+    payload = {
+        "action": rec.action,
+        "rationale": rec.rationale,
+        "fee_per_leg_pct": config.FEE_RATE * 100,
+        "target": snap(rec.to_base) if rec.to_base else None,
+        "current_holding": snap(rec.from_base) if rec.from_base else None,
+    }
+    res = auditor.audit(rec.action, rec.to_base, rec.from_base, payload,
+                        audit_enabled=True)
+    if res.used:
+        session.add(AuditLog(
+            action=rec.action, to_base=rec.to_base,
+            verdict="VETO" if not res.approved else "APPROVE",
+            reason=res.reason[:500], model=res.model,
+        ))
+    return res
 
 
 def _execution_allowed(settings: Settings, pf: Portfolio, rec: Rec) -> tuple[bool, str]:
@@ -161,7 +255,63 @@ def _execute(broker: Broker, rec: Rec, pf: Portfolio, stats_by_base, session, se
         sell_stat = stats_by_base.get(pf.pos_base)
         buy_stat = stats_by_base[rec.to_base]
         if sell_stat and pf.pos_base != rec.to_base:
-            record(broker.exit(pf, sell_stat.last))
-            record(broker.enter(pf, rec.to_base, buy_stat.product_id, buy_stat.last))
+            _rotate_cheapest(broker, pf, sell_stat, buy_stat, settings, record)
 
     return results
+
+
+def _rotate_cheapest(broker, pf, sell_stat, buy_stat, settings, record) -> None:
+    """Rotate the position into the target via whichever path keeps more value:
+    a single Coinbase Convert, or two order-book legs (sell->USD->buy).
+
+    Two-leg keeps (1-fee)^2 of value. Convert keeps to_qty*buy_price / position
+    value, inclusive of Coinbase's convert spread+fee. We only use Convert (LIVE
+    only) when a real quote says it keeps strictly more, and a confirmed commit
+    succeeds; otherwise we fall back to the two legs."""
+    fee = broker.fee_rate
+    two_leg_keep = (1 - fee) ** 2
+
+    def two_leg():
+        record(broker.exit(pf, sell_stat.last))
+        record(broker.enter(pf, buy_stat.base, buy_stat.product_id, buy_stat.last))
+
+    # Convert is a real-money, live-only path.
+    if settings.dry_run:
+        return two_leg()
+
+    from_qty = pf.pos_quantity
+    in_value = from_qty * sell_stat.last
+    quote = broker.convert_quote(pf.pos_base, buy_stat.base, from_qty)
+    convert_keep = None
+    if quote and in_value > 0 and quote.to_qty > 0:
+        convert_keep = (quote.to_qty * buy_stat.last) / in_value
+
+    use_convert = (
+        convert_keep is not None and convert_keep > two_leg_keep and convert_keep <= 1.02
+    )
+    if not use_convert:
+        log.info("rotation route=two_leg (convert_keep=%s two_leg_keep=%.4f)", convert_keep, two_leg_keep)
+        return two_leg()
+
+    # Commit the convert; only book it if Coinbase confirms it settled.
+    realized_to = broker.convert_commit(quote)
+    if not realized_to or realized_to <= 0:
+        # Uncertain outcome: do NOT also place orders (avoid double execution).
+        # Next live cycle reconciles from real balances and retries if needed.
+        log.warning("convert commit unconfirmed; skipping rotation this cycle")
+        return
+
+    out_value = realized_to * buy_stat.last
+    cost_basis = pf.pos_cost_basis_usd
+    tid = f"convert:{quote.trade_id}"
+    # Book the closed leg (realized P&L vs basis) and the opened leg, no USD touched.
+    record(TradeResult("SELL", sell_stat.base, sell_stat.last, from_qty,
+                       out_value, out_value - cost_basis, "LIVE", tid))
+    pf.pos_base = buy_stat.base
+    pf.pos_product_id = buy_stat.product_id
+    pf.pos_quantity = realized_to
+    pf.pos_cost_basis_usd = out_value
+    pf.pos_mark_price = buy_stat.last
+    record(TradeResult("BUY", buy_stat.base, buy_stat.last, realized_to,
+                       -out_value, None, "LIVE", tid))
+    log.info("rotation route=convert (keep=%.4f > %.4f)", convert_keep, two_leg_keep)

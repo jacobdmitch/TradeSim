@@ -45,6 +45,7 @@ class Settings(Base):
     seeded: Mapped[bool] = mapped_column(Boolean, default=False)
     starting_balance: Mapped[float] = mapped_column(Float, default=23.17)
     balance_floor_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    audit_enabled: Mapped[bool] = mapped_column(Boolean, default=False)  # Claude pre-trade audit
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
 
 
@@ -118,9 +119,38 @@ class EquitySnapshot(Base):
     holding: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
 
 
+class AuditLog(Base):
+    """Record of each Claude pre-trade audit (approve or veto)."""
+    __tablename__ = "audits"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    action: Mapped[str] = mapped_column(String(8))          # the pending action audited
+    to_base: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    verdict: Mapped[str] = mapped_column(String(12))        # APPROVE | VETO
+    reason: Mapped[str] = mapped_column(Text)
+    model: Mapped[Optional[str]] = mapped_column(String(48), nullable=True)
+
+
+def _run_migrations() -> None:
+    """Idempotently add columns introduced after a DB was first created.
+    create_all() makes new tables but never alters existing ones."""
+    from sqlalchemy import inspect, text
+    insp = inspect(ENGINE)
+    try:
+        cols = {c["name"] for c in insp.get_columns("settings")}
+    except Exception:
+        return  # table not created yet; create_all will handle it
+    if "audit_enabled" not in cols:
+        with ENGINE.begin() as conn:
+            conn.execute(text(
+                "ALTER TABLE settings ADD COLUMN audit_enabled BOOLEAN DEFAULT FALSE"
+            ))
+
+
 def init_db() -> None:
     """Create tables and seed the singleton control rows if missing."""
     Base.metadata.create_all(ENGINE)
+    _run_migrations()
     with SessionLocal() as s:
         if s.get(Settings, 1) is None:
             s.add(Settings(

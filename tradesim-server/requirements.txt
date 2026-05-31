@@ -6,4 +6,5 @@ requests==2.32.3
 jinja2==3.1.5
 python-multipart==0.0.20
 coinbase-advanced-py==1.8.2
+anthropic==0.105.2
 python-dotenv==1.0.1

@@ -92,6 +92,12 @@ BALANCE_FLOOR_DEFAULT = _f("BALANCE_FLOOR_USD", 0.0)
 
 DASHBOARD_TOKEN = os.environ.get("DASHBOARD_TOKEN", "").strip()
 
+# ---- Claude pre-trade audit (optional, veto-only) ----
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+AUDIT_MODEL = os.environ.get("AUDIT_MODEL", "claude-haiku-4-5-20251001").strip()
+AUDIT_ENABLED_DEFAULT = _b("AUDIT_ENABLED", False)
+AUDIT_MAX_SEARCHES = int(os.environ.get("AUDIT_MAX_SEARCHES", "3"))
+
 COINBASE_API_KEY = os.environ.get("COINBASE_API_KEY", "").strip()
 # Allow the PEM to be supplied with escaped newlines.
 COINBASE_API_SECRET = os.environ.get("COINBASE_API_SECRET", "").replace("\\n", "\n").strip()

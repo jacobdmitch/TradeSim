@@ -88,6 +88,22 @@ Strategy parameters live in `app/config.py` (`StrategyConfig`, `RotationConfig`,
 `FEE_RATE`, `MIN_LIQUIDITY_USD`) and match the iOS app's defaults. Change the
 cron cadence in `render.yaml` (`schedule`).
 
+## Rotation routing (fee minimization)
+
+When the strategy rotates from one coin to another in **LIVE** mode, it picks the
+cheaper of two paths per trade:
+
+- **Two order-book legs** (sell→USD→buy on Advanced Trade): no spread, ~0.6% fee
+  per leg.
+- **Coinbase Convert** (single step): one step, but Coinbase bakes a spread into
+  the rate on top of fees.
+
+It fetches a live Convert quote, compares how much value each path retains, and
+uses Convert only if it strictly keeps more and the commit confirms — otherwise
+it falls back to the two legs. If a Convert is chosen but can't be confirmed, the
+cycle does nothing and the next cycle reconciles from real balances (no double
+execution). DRY-RUN always uses the two-leg model.
+
 ## Reality check
 
 This trades a tiny balance in a thin market. After ~0.6%/leg fees and DIMO's

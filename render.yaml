@@ -41,6 +41,12 @@ services:
         sync: false           # set in the Render dashboard (secret)
       - key: DASHBOARD_TOKEN
         sync: false           # optional shared secret for control actions
+      - key: ANTHROPIC_API_KEY
+        sync: false           # optional; enables the Claude pre-trade audit
+      - key: AUDIT_ENABLED
+        value: "false"        # toggle the audit from the dashboard
+      - key: AUDIT_MODEL
+        value: "claude-haiku-4-5-20251001"
 
   # ---- The dashboard ----
   - type: web
@@ -63,3 +69,9 @@ services:
         sync: false
       - key: DASHBOARD_TOKEN
         sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: AUDIT_ENABLED
+        value: "false"
+      - key: AUDIT_MODEL
+        value: "claude-haiku-4-5-20251001"
