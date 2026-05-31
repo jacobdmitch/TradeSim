@@ -57,10 +57,12 @@ tradesim-server/
 
 ## Deploy on Render
 
-1. Put this folder in a Git repo (its own repo, or set Render's **Root Directory**
-   to `tradesim-server` if it stays inside the TradeSim monorepo).
-2. Render Dashboard → **New → Blueprint** → select the repo. It reads
-   `render.yaml` and creates the Postgres DB, the cron job, and the dashboard.
+1. The active Blueprint is `render.yaml` at the **repository root** (Render only
+   reads `render.yaml` from the repo root, never a subfolder). It already sets
+   `rootDir: tradesim-server` on both services, so the trader and dashboard build
+   and run from this folder. Commit and push it to your `main` branch.
+2. Render Dashboard → **New → Blueprint** → select the repo and `main` branch. It
+   reads the root `render.yaml` and creates the Postgres DB, cron job, and dashboard.
 3. In each service's **Environment**, set the secrets marked `sync: false`:
    `COINBASE_API_KEY`, `COINBASE_API_SECRET`, and optionally `DASHBOARD_TOKEN`.
 4. Open the dashboard URL. It will already be tracking your seeded $23.17 DIMO

@@ -1,62 +1,6 @@
-# Render Blueprint for the TradeSim auto-trader.
-# Creates: a Postgres DB, a cron job (the trader), and a web service (dashboard).
-# Deploy via Render Dashboard -> New -> Blueprint, pointed at this repo.
+# NOTE: Render only reads a Blueprint named render.yaml from the REPOSITORY ROOT.
+# The active blueprint now lives at ../render.yaml (the TradeSim repo root) and
+# points back here via `rootDir: tradesim-server`.
 #
-# NOTE: set the Root Directory to "tradesim-server" in Render if this lives
-# inside the TradeSim monorepo, or move this folder to its own repo.
-
-databases:
-  - name: tradesim-db
-    plan: basic-256mb        # smallest paid Postgres; adjust to your account
-    databaseName: tradesim
-    user: tradesim
-
-services:
-  # ---- The trader: runs one cycle every 10 minutes ----
-  - type: cron
-    name: tradesim-trader
-    runtime: python
-    plan: starter
-    schedule: "*/10 * * * *"
-    buildCommand: "pip install -r requirements.txt"
-    startCommand: "python run_cycle.py"
-    envVars:
-      - key: DATABASE_URL
-        fromDatabase:
-          name: tradesim-db
-          property: connectionString
-      - key: STARTING_BALANCE
-        value: "23.17"
-      - key: TRADING_ENABLED
-        value: "false"        # master switch; flip ON from the dashboard when ready
-      - key: DRY_RUN
-        value: "true"         # start in paper mode; flip to LIVE from the dashboard
-      - key: BALANCE_FLOOR_USD
-        value: "0"
-      - key: COINBASE_API_KEY
-        sync: false           # set in the Render dashboard (secret)
-      - key: COINBASE_API_SECRET
-        sync: false           # set in the Render dashboard (secret)
-      - key: DASHBOARD_TOKEN
-        sync: false           # optional shared secret for control actions
-
-  # ---- The dashboard ----
-  - type: web
-    name: tradesim-dashboard
-    runtime: python
-    plan: starter             # use "free" to save money (sleeps after 15m idle)
-    buildCommand: "pip install -r requirements.txt"
-    startCommand: "uvicorn app.web:app --host 0.0.0.0 --port $PORT"
-    envVars:
-      - key: DATABASE_URL
-        fromDatabase:
-          name: tradesim-db
-          property: connectionString
-      - key: STARTING_BALANCE
-        value: "23.17"
-      - key: COINBASE_API_KEY
-        sync: false
-      - key: COINBASE_API_SECRET
-        sync: false
-      - key: DASHBOARD_TOKEN
-        sync: false
+# This file is kept only as a reference copy and is NOT used by Render. Edit the
+# root ../render.yaml instead.
