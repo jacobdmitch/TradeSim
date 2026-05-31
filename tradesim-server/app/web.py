@@ -141,6 +141,23 @@ def _render(st: Settings, pf: Portfolio, rec, recs, trades, last_scan, realized,
     holding = pf.pos_base or "USD (cash)"
     up = ret >= 0
 
+    # Holding detail: explains value moves between trades (mark-to-market).
+    if pf.has_position and pf.pos_quantity > 0:
+        cur_price = pf.pos_mark_price
+        entry_price = pf.pos_cost_basis_usd / pf.pos_quantity if pf.pos_quantity else 0.0
+        upnl = pf.position_value - pf.pos_cost_basis_usd
+        upnl_pct = (upnl / pf.pos_cost_basis_usd * 100) if pf.pos_cost_basis_usd else 0.0
+        upnl_class = "pos" if upnl >= 0 else "neg"
+        holding_detail = (
+            f"<div class='hdetail'>"
+            f"<span>price ${cur_price:,.6f}</span>"
+            f"<span>entry ${entry_price:,.6f}</span>"
+            f"<span class='{upnl_class}'>unrealized ${upnl:+,.2f} ({upnl_pct:+.1f}%)</span>"
+            f"</div>"
+        )
+    else:
+        holding_detail = "<div class='hdetail'><span>in USD cash</span></div>"
+
     mode_badge = (
         '<span class="badge live">● LIVE</span>' if not st.dry_run
         else '<span class="badge dry">◐ DRY-RUN</span>'
@@ -240,7 +257,8 @@ def _render(st: Settings, pf: Portfolio, rec, recs, trades, last_scan, realized,
     # Chart data.
     eq_labels = [e.ts.strftime("%m/%d %H:%M") for e in equity]
     eq_values = [round(e.total_value, 4) for e in equity]
-    equity_json = json.dumps({"labels": eq_labels, "values": eq_values})
+    eq_holdings = [e.holding or "USD" for e in equity]
+    equity_json = json.dumps({"labels": eq_labels, "values": eq_values, "holdings": eq_holdings})
     alloc_json = json.dumps({
         "cash": round(pf.cash, 4),
         "position": round(pf.position_value, 4),
@@ -263,6 +281,7 @@ def _render(st: Settings, pf: Portfolio, rec, recs, trades, last_scan, realized,
         "ret_pct": f"{ret_pct:+.1f}",
         "ret_class": "pos" if up else "neg",
         "holding": _esc(holding),
+        "holding_detail": holding_detail,
         "realized": f"{realized:+,.2f}",
         "err_banner": err_banner,
         "dry_run_form": dry_run_form,
@@ -332,6 +351,8 @@ _PAGE = """<!doctype html>
   .card .value { font-size:26px; font-weight:800; margin-top:6px; letter-spacing:-.01em; }
   .value.pos { color:var(--pos); } .value.neg { color:var(--neg); }
   .holding-chip { display:inline-block; margin-top:6px; font-size:18px; font-weight:700; }
+  .hdetail { display:flex; flex-direction:column; gap:2px; margin-top:8px; font-size:12px; color:var(--muted); }
+  .hdetail .pos { color:var(--pos); } .hdetail .neg { color:var(--neg); }
 
   .panel { background:linear-gradient(160deg,var(--panel),var(--panel2));
     border:1px solid var(--line); border-radius:16px; padding:18px; margin-bottom:18px;
@@ -391,7 +412,7 @@ _PAGE = """<!doctype html>
     <div class="card"><div class="label">Total Return</div>
       <div class="value $ret_class">$$${ret} <span class="small">($ret_pct%)</span></div></div>
     <div class="card"><div class="label">Holding</div>
-      <div class="holding-chip">$holding</div></div>
+      <div class="holding-chip">$holding</div>$holding_detail</div>
   </div>
 
   <div class="panel charts">
@@ -488,7 +509,13 @@ if (window.Chart) {
       animation: { duration: 1100, easing: 'easeOutCubic' },
       interaction: { intersect: false, mode: 'index' },
       plugins: { legend: { display: false },
-        tooltip: { callbacks: { label: function(c){ return D + c.parsed.y.toFixed(2); } } } },
+        tooltip: { callbacks: {
+          label: function(c){ return D + c.parsed.y.toFixed(2); },
+          afterLabel: function(c){
+            var h = (EQUITY.holdings || [])[c.dataIndex];
+            return h ? ('holding ' + h) : '';
+          }
+        } } },
       scales: {
         x: { grid: { display: false }, ticks: { maxTicksLimit: 6 } },
         y: { grid: { color: 'rgba(143,179,191,0.10)' },
