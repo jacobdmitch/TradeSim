@@ -443,6 +443,15 @@ _PAGE = """<!doctype html>
     padding: calc(26px + env(safe-area-inset-top)) calc(18px + env(safe-area-inset-right))
              calc(72px + env(safe-area-inset-bottom)) calc(18px + env(safe-area-inset-left)); }
   .head { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+  /* Refresh button — iPhone web apps can't pull-to-refresh, so reload from here. */
+  .refresh { margin-left:auto; flex:none; width:40px; height:40px; border-radius:50%;
+    display:inline-flex; align-items:center; justify-content:center; text-decoration:none;
+    font-size:20px; line-height:1; color:#06202a;
+    background:linear-gradient(180deg,var(--leaf),var(--teal));
+    box-shadow:0 6px 16px rgba(82,182,154,.25);
+    transition:transform .25s ease, filter .12s ease; }
+  .refresh:hover { transform:rotate(90deg); filter:brightness(1.05); }
+  .refresh:active { transform:rotate(180deg); }
   h1 { font-size:24px; margin:0; font-weight:800; letter-spacing:-.02em;
     background:linear-gradient(90deg,var(--lime),var(--jade),var(--aqua),var(--sea));
     background-size:300% 100%; -webkit-background-clip:text; background-clip:text;
@@ -482,9 +491,10 @@ _PAGE = """<!doctype html>
   @media (max-width:640px){
     .charts{ grid-template-columns:1fr } .grid{ grid-template-columns:1fr }
     h1{ font-size:21px } .cbox{ height:200px }
-    /* Let the wide trades table scroll sideways instead of squashing. */
-    .tscroll{ overflow-x:auto; -webkit-overflow-scrolling:touch; }
-    .tscroll table{ min-width:560px; }
+    /* Trades fit the screen width: smaller type and cells wrap to a second
+       line instead of scrolling sideways. */
+    th,td{ padding:7px 5px; font-size:11px; }
+    .tradespanel{ padding:12px; }
     /* Controls become full-width, comfortably tappable rows. */
     .controls{ gap:8px; }
     .controls form.inline, .controls button{ width:100%; }
@@ -527,6 +537,14 @@ _PAGE = """<!doctype html>
   th,td { text-align:left; padding:9px 6px; border-bottom:1px solid var(--line); font-variant-numeric:tabular-nums; }
   th { color:var(--muted); font-weight:700; font-size:11px; text-transform:uppercase; letter-spacing:.04em; }
   tbody tr { transition:background .12s ease; } tbody tr:hover { background:rgba(82,182,154,.07); }
+  /* Recent-trades list: bound to ~10 rows and scroll vertically (sticky header).
+     The panel keeps wide side padding that doesn't scroll, so swiping the
+     gutters scrolls the whole page rather than the inner table. */
+  .tradespanel { padding:14px 20px; }
+  .tscroll { max-height:24rem; overflow-y:auto; overflow-x:hidden;
+    -webkit-overflow-scrolling:touch; }
+  .tscroll thead th { position:sticky; top:0; background:var(--panel2);
+    box-shadow:inset 0 -1px 0 var(--line); z-index:2; }
   .buy { color:var(--grass); font-weight:700; } .sell { color:var(--neg); font-weight:700; }
   .muted { color:var(--muted); } .small { font-size:12px; } .err { color:var(--neg); }
   .banner { background:rgba(244,151,142,.14); color:#ffd0c9; border:1px solid rgba(244,151,142,.35);
@@ -570,7 +588,8 @@ _PAGE = """<!doctype html>
     color:var(--muted); margin-top:10px; }
 </style></head>
 <body><div class="wrap">
-  <div class="head"><h1>TradeSim</h1> $mode_badge $enabled_badge $audit_badge</div>
+  <div class="head"><h1>TradeSim</h1> $mode_badge $enabled_badge $audit_badge
+    <a class="refresh" href="/" aria-label="Refresh" title="Refresh">⟳</a></div>
   <div class="sub">Seed $seed · started at $$${start} · ${floor_note}auto-rotation strategy</div>
 
   <div class="grid">
@@ -611,11 +630,13 @@ _PAGE = """<!doctype html>
   $scan_line
 
   <h2>Recent trades</h2>
-  <div class="panel tscroll" style="padding:8px 14px">
-  <table>
-    <thead><tr><th>When</th><th>Side</th><th>Coin</th><th>Qty</th><th>Price</th><th>Cash flow</th><th>Fee</th><th>P&amp;L</th><th>Mode</th></tr></thead>
-    <tbody>$trade_rows</tbody>
-  </table></div>
+  <div class="panel tradespanel">
+    <div class="tscroll">
+    <table>
+      <thead><tr><th>When</th><th>Side</th><th>Coin</th><th>Qty</th><th>Price</th><th>Cash flow</th><th>Fee</th><th>P&amp;L</th><th>Mode</th></tr></thead>
+      <tbody>$trade_rows</tbody>
+    </table></div>
+  </div>
   <p class="muted small">Realized P&amp;L to date: $$${realized} · Fees paid to date: $$${fees_total}</p>
 
   <h2>Recommendation history</h2>
