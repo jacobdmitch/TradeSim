@@ -117,6 +117,17 @@ VETO_EXCLUSION_HOURS_DEFAULT = int(os.environ.get("VETO_EXCLUSION_HOURS", "24"))
 MIN_HOLD_BYPASS_SHELF_PCT = float(os.environ.get("MIN_HOLD_BYPASS_SHELF_PCT", "1.2"))
 MIN_HOLD_BYPASS_ALTERNATIVES = int(os.environ.get("MIN_HOLD_BYPASS_ALTERNATIVES", "3"))
 
+# Selection logic: "anti_chasing" (avoid extended/overbought, prefer pullbacks)
+# or "momentum" (legacy top-gainer chasing). Backtest favored anti_chasing+regime.
+SELECTION_MODE = os.environ.get("SELECTION_MODE", "anti_chasing").strip()
+
+# Regime gate: only deploy out of cash when BTC is trending up AND at least this
+# fraction of the analyzed universe is trending up; otherwise sit in cash.
+REGIME_BREADTH_MIN = float(os.environ.get("REGIME_BREADTH_MIN", "0.5"))
+# Anti-chasing guardrails
+ANTI_RSI_MAX = float(os.environ.get("ANTI_RSI_MAX", "68"))
+ANTI_EXTENSION_MAX = float(os.environ.get("ANTI_EXTENSION_MAX", "6.0"))  # % above short SMA
+
 COINBASE_API_KEY = os.environ.get("COINBASE_API_KEY", "").strip()
 # Allow the PEM to be supplied with escaped newlines.
 COINBASE_API_SECRET = os.environ.get("COINBASE_API_SECRET", "").replace("\\n", "\n").strip()
