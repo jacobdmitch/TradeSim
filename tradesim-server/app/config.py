@@ -104,12 +104,18 @@ INTERVAL_MINUTES_DEFAULT = int(os.environ.get("INTERVAL_MINUTES", "15"))
 INTERVAL_CHOICES = [15, 30, 45, 60]
 CRON_GRANULARITY_MIN = 15  # must match render.yaml cron schedule
 
-# Minimum time to hold a coin before rotating to another (cuts churn). A
-# protective exit-to-cash is always allowed; this only blocks coin->coin flips.
+# Minimum time to hold before opening/switching a position (cuts churn). A
+# protective exit-to-cash is always allowed; this blocks ENTER and ROTATE.
 MIN_HOLD_HOURS_DEFAULT = int(os.environ.get("MIN_HOLD_HOURS", "6"))
 
 # Hours a token stays excluded after receiving 2 consecutive AI Auditor vetos.
 VETO_EXCLUSION_HOURS_DEFAULT = int(os.environ.get("VETO_EXCLUSION_HOURS", "24"))
+
+# Min-hold bypass: if the current holding drops below this edge % AND at least
+# MIN_HOLD_BYPASS_ALTERNATIVES other scored coins are above it, the 6-hour lock
+# is lifted so the next refresh can act on a ROTATE or EXIT recommendation.
+MIN_HOLD_BYPASS_SHELF_PCT = float(os.environ.get("MIN_HOLD_BYPASS_SHELF_PCT", "1.2"))
+MIN_HOLD_BYPASS_ALTERNATIVES = int(os.environ.get("MIN_HOLD_BYPASS_ALTERNATIVES", "3"))
 
 COINBASE_API_KEY = os.environ.get("COINBASE_API_KEY", "").strip()
 # Allow the PEM to be supplied with escaped newlines.

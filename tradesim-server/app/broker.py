@@ -158,6 +158,7 @@ class Broker:
         pf.pos_cost_basis_usd = usd_value
         pf.pos_mark_price = price
         pf.pos_opened_at = datetime.now(timezone.utc)
+        pf.last_change_at = pf.pos_opened_at
 
     # ---- Enter: deploy all cash into `base` ----
     def enter(self, pf: Portfolio, base: str, product_id: str, price: float) -> Optional[TradeResult]:
@@ -175,6 +176,7 @@ class Broker:
             pf.pos_cost_basis_usd = invested
             pf.pos_mark_price = price
             pf.pos_opened_at = datetime.now(timezone.utc)
+            pf.last_change_at = pf.pos_opened_at
             return TradeResult("BUY", base, price, qty, -spend, None, "DRY", fee_usd=spend * self.fee_rate)
 
         # LIVE: market buy using available USD as quote_size.
@@ -191,6 +193,8 @@ class Broker:
         pf.pos_quantity = qty
         pf.pos_cost_basis_usd = invested
         pf.pos_mark_price = avg_price
+        pf.pos_opened_at = datetime.now(timezone.utc)
+        pf.last_change_at = pf.pos_opened_at
         return TradeResult("BUY", base, avg_price, qty, -fill["filled_value"], None, "LIVE", order_id,
                            fee_usd=fill["fees"])
 
@@ -231,6 +235,8 @@ class Broker:
         pf.pos_quantity = 0.0
         pf.pos_cost_basis_usd = 0.0
         pf.pos_mark_price = 0.0
+        pf.pos_opened_at = None
+        pf.last_change_at = datetime.now(timezone.utc)
 
     # ---- Coinbase order helpers ----
     def _place_market(self, product_id: str, side: str,

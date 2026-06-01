@@ -173,6 +173,17 @@ def strat_anti_chasing(feats: Dict[str, Feat]) -> Optional[str]:
     return best
 
 
+def regime_ok(feats: Dict[str, Feat]) -> bool:
+    """Favorable market: BTC in an uptrend AND most of the universe trending up.
+    When false, the wrapper forces a move to cash (don't fight a down market)."""
+    if not feats:
+        return False
+    btc = feats.get("BTC")
+    btc_up = btc.trend_up if btc else True
+    breadth = sum(1 for f in feats.values() if f.trend_up) / len(feats)
+    return btc_up and breadth >= 0.5
+
+
 def strat_mean_reversion(feats: Dict[str, Feat]) -> Optional[str]:
     # longer-term uptrend but short-term oversold -> buy the dip
     best, best_score = None, None
@@ -201,10 +212,11 @@ class Result:
 
 
 def run_strategy(name: str, target_fn: Callable, timeline, closes, vols,
-                 start_cash: float = 100.0, min_hold_bars: int = MIN_HOLD_BARS) -> Result:
+                 start_cash: float = 100.0, min_hold_bars: int = MIN_HOLD_BARS,
+                 use_regime: bool = False, brake_all: bool = False) -> Result:
     cash, base, qty, basis = start_cash, None, 0.0, 0.0
     pending = None          # last bar's target signal (for 2-scan confirm)
-    entry_bar = -10**9      # bar index when current position was opened
+    last_change = -10**9    # bar index of the last position change
     trades = 0
     fees = 0.0
     equity = []
@@ -223,29 +235,46 @@ def run_strategy(name: str, target_fn: Callable, timeline, closes, vols,
                 feats[b] = f
         target = target_fn(feats) if feats else None
 
-        # 2-scan confirmation: only switch when the target repeats across 2 bars
+        # Regime filter: in an unfavorable market, force a move to cash.
+        if use_regime and not regime_ok(feats):
+            target = None
+
+        # 2-scan confirmation: only act when the target repeats across 2 bars
         confirmed = (target == pending)
         pending = target
 
         if confirmed and target != base:
-            price_now = closes.get(target, [None] * n)[i] if target else None
-            # sell current
-            if base is not None:
+            # Selling to cash (protective) is always allowed.
+            if target is None:
                 gross = qty * closes[base][i]
                 proceeds = gross * (1 - FEE)
                 fees += gross * FEE
                 cash += proceeds
                 trades += 1
                 base, qty, basis = None, 0.0, 0.0
-            # buy target
-            if target is not None and price_now and price_now > 0:
-                invested = cash * (1 - FEE)
-                fees += cash * FEE
-                qty = invested / price_now
-                basis = invested
-                base = target
-                cash = 0.0
-                trades += 1
+                last_change = i
+            else:
+                # Opening/switching requires the brake to be satisfied: enough
+                # bars since the last change (blocks coin->coin AND cash-hopping).
+                brake_bars = min_hold_bars if (brake_all or base is not None) else 0
+                if (i - last_change) >= brake_bars:
+                    price_now = closes.get(target, [None] * n)[i]
+                    if base is not None:
+                        gross = qty * closes[base][i]
+                        proceeds = gross * (1 - FEE)
+                        fees += gross * FEE
+                        cash += proceeds
+                        trades += 1
+                        base, qty, basis = None, 0.0, 0.0
+                    if price_now and price_now > 0:
+                        invested = cash * (1 - FEE)
+                        fees += cash * FEE
+                        qty = invested / price_now
+                        basis = invested
+                        base = target
+                        cash = 0.0
+                        trades += 1
+                        last_change = i
 
         # mark to market
         value = cash + (qty * closes[base][i] if base else 0.0)
@@ -278,10 +307,12 @@ def main():
     days = len(timeline) / 24.0
     print(f"Universe: {len(closes)} coins | {len(timeline)} hourly bars (~{days:.1f} days)\n")
 
+    rg = dict(use_regime=True, brake_all=True)
     results = [
-        run_strategy("current", strat_current, timeline, closes, vols),
-        run_strategy("anti_chasing", strat_anti_chasing, timeline, closes, vols),
-        run_strategy("mean_reversion", strat_mean_reversion, timeline, closes, vols),
+        run_strategy("current(raw)", strat_current, timeline, closes, vols),
+        run_strategy("current+rg", strat_current, timeline, closes, vols, **rg),
+        run_strategy("anti+rg", strat_anti_chasing, timeline, closes, vols, **rg),
+        run_strategy("meanrev+rg", strat_mean_reversion, timeline, closes, vols, **rg),
         run_hold_dimo(timeline, closes),
     ]
     # cash baseline
@@ -291,8 +322,27 @@ def main():
     print("-" * 60)
     for r in sorted(results, key=lambda r: r.ret_pct, reverse=True):
         print(f"{r.name:16} {r.ret_pct:>+8.2f}% {r.final:>8.2f} {r.trades:>7} {r.fees:>7.2f} {r.max_dd:>6.1f}%")
-    print(f"\nWindow: ~{days:.1f} days of 1h candles. Start $100, "
-          f"fee {FEE*100:.1f}%/leg, 2-scan confirm. Past results, not predictive.")
+
+    # Walk-forward: return within each equal time segment (consistency check).
+    n = len(timeline)
+    seg = max(n // WALK_SEGMENTS, 1)
+    bounds = [(k * seg, (n if k == WALK_SEGMENTS - 1 else (k + 1) * seg)) for k in range(WALK_SEGMENTS)]
+    print(f"\nWalk-forward (return % within each ~{days / WALK_SEGMENTS:.1f}-day window):")
+    hdr = "  ".join([f"seg{k+1}" for k in range(WALK_SEGMENTS)])
+    print(f"{'strategy':16} {hdr}")
+    print("-" * 60)
+    for r in results:
+        if not r.equity:
+            continue
+        segs = []
+        for (a, b) in bounds:
+            sv, ev = r.equity[a], r.equity[min(b, n) - 1]
+            segs.append((ev / sv - 1) * 100 if sv else 0.0)
+        cells = "  ".join(f"{x:>+5.1f}" for x in segs)
+        print(f"{r.name:16} {cells}")
+
+    print(f"\nWindow: ~{days:.1f} days of 1h candles. Start $100, fee {FEE*100:.1f}%/leg, "
+          f"2-scan confirm, {MIN_HOLD_BARS}h min-hold. Past results, not predictive.")
 
 
 if __name__ == "__main__":

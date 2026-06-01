@@ -369,7 +369,13 @@ def _render(st: Settings, pf: Portfolio, rec, recs, trades, last_scan, realized,
         for r in recs
     ) or "<li class='muted'>None yet.</li>"
 
-    pending = bool(last_scan and last_scan.note and "awaiting_confirmation" in last_scan.note)
+    note = (last_scan.note or "") if last_scan else ""
+    pending = "awaiting_confirmation" in note
+    regime_unfav = "regime=unfavorable" in note
+    regime_chip = (
+        "<span class='regime-bad'>● regime: cash-only</span>" if regime_unfav
+        else ("<span class='regime-ok'>● regime: favorable</span>" if "regime=favorable" in note else "")
+    )
     scan_line = ""
     if last_scan:
         # When we have the ranked-candidate detail, make the count a button that
@@ -390,6 +396,7 @@ def _render(st: Settings, pf: Portfolio, rec, recs, trades, last_scan, realized,
             cand_modal = ""
         scan_line = (
             f"<p class='muted small'>Last scan {_ago(last_scan.ts)} · {count_html}"
+            + (f" · {regime_chip}" if regime_chip else "")
             + (" · <span class='pending'>awaiting 2nd-scan confirmation</span>" if pending else "")
             + (f" · <span class='err'>error: {_esc(last_scan.error)}</span>" if last_scan.error else "")
             + "</p>" + cand_modal
@@ -656,6 +663,7 @@ _PAGE = """<!doctype html>
   ul { padding-left:18px; } li { margin-bottom:6px; font-size:13px; }
   .disclaimer { margin-top:30px; font-size:12px; color:var(--muted); opacity:.8; }
   .pending { color:var(--lime); font-weight:600; }
+  .regime-ok { color:var(--grass); font-weight:600; } .regime-bad { color:#f4b16e; font-weight:600; }
   /* Clickable candidate count + its popup. */
   .candlink { background:none; border:0; box-shadow:none; padding:0; margin:0;
     font:inherit; font-weight:700; color:var(--aqua); cursor:pointer;

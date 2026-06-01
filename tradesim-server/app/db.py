@@ -67,6 +67,7 @@ class Portfolio(Base):
     pos_cost_basis_usd: Mapped[float] = mapped_column(Float, default=0.0)
     pos_mark_price: Mapped[float] = mapped_column(Float, default=0.0)
     pos_opened_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_change_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)  # any position change
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
 
     @property
@@ -158,6 +159,7 @@ def _run_migrations() -> None:
         ],
         "portfolio": [
             ("pos_opened_at", "TIMESTAMP"),
+            ("last_change_at", "TIMESTAMP"),
         ],
         "trades": [
             ("fee_usd", "FLOAT DEFAULT 0"),

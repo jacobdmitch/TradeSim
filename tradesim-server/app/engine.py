@@ -96,6 +96,17 @@ def run_once(force: bool = False) -> CycleResult:
 
         rec = predictor.recommend(ranked, pf.pos_base, config.FEE_RATE)
 
+        # Regime gate: in an unfavorable market, don't deploy — sit in cash.
+        regime_ok = _regime_ok(ranked)
+        if config.SELECTION_MODE == "anti_chasing" and not regime_ok:
+            if pf.pos_base:
+                rec = Rec("EXIT", pf.pos_base, None,
+                          "Unfavorable market regime — moving to cash.", 0.0)
+            else:
+                rec = Rec("HOLD", None, None,
+                          "Unfavorable market regime — staying in cash.", 0.0)
+        note_parts_regime = "favorable" if regime_ok else "unfavorable"
+
         # Persist the recommendation only when it changes (matches the app).
         # Scope to the current run so the first cycle after a mode switch always
         # records a fresh recommendation.
@@ -117,7 +128,7 @@ def run_once(force: bool = False) -> CycleResult:
 
         executed: List[TradeResult] = []
         note_parts = [f"mode={'DRY' if settings.dry_run else 'LIVE'}",
-                      f"enabled={settings.enabled}"]
+                      f"enabled={settings.enabled}", f"regime={note_parts_regime}"]
         if veto_excluded:
             note_parts.append(f"veto_excluded:{','.join(sorted(veto_excluded.keys()))}")
 
@@ -134,8 +145,21 @@ def run_once(force: bool = False) -> CycleResult:
             hold_block, hold_remaining = _within_min_hold(pf, settings)
             if not allowed:
                 note_parts.append(f"not_executed:{reason}")
-            elif rec.action == "ROTATE" and hold_block:
-                note_parts.append(f"min_hold:{hold_remaining:.1f}h_left")
+            elif rec.action in {"ENTER", "ROTATE"} and hold_block:
+                if _min_hold_bypassed(pf, ranked):
+                    note_parts.append(f"min_hold_bypassed:holding_below_shelf({config.MIN_HOLD_BYPASS_SHELF_PCT}%)")
+                    # Lock lifted — still require 2-scan confirmation to guard against whipsaw.
+                    if needs_confirm and not persisted:
+                        note_parts.append("awaiting_confirmation:1of2")
+                    else:
+                        audit_res = _run_audit(rec, ranked, pf, stats_by_base, settings, session)
+                        if audit_res is not None and audit_res.used and not audit_res.approved:
+                            note_parts.append(f"audit_veto:{audit_res.reason[:80]}")
+                        else:
+                            executed = _execute(broker, rec, pf, stats_by_base, session, settings)
+                            note_parts.append(f"executed={[t.action for t in executed]}")
+                else:
+                    note_parts.append(f"min_hold:{hold_remaining:.1f}h_left")
             elif needs_confirm and not persisted:
                 note_parts.append("awaiting_confirmation:1of2")
             else:
@@ -206,6 +230,7 @@ def _reconcile_live(broker: Broker, pf: Portfolio, settings: Settings, stats_by_
             pf.pos_mark_price = st.last
             pf.pos_cost_basis_usd = seed_qty * st.last  # basis = value at takeover (PnL starts at 0)
             pf.pos_opened_at = datetime.now(timezone.utc)
+            pf.last_change_at = pf.pos_opened_at
         settings.seeded = True
         settings.starting_balance = pf.total_value  # real baseline for return %
 
@@ -269,17 +294,49 @@ def _run_audit(rec: Rec, ranked: List[CoinScore], pf: Portfolio, stats_by_base,
     return res
 
 
+def _regime_ok(ranked: List[CoinScore]) -> bool:
+    """Favorable market: BTC trending up AND at least REGIME_BREADTH_MIN of the
+    analyzed universe trending up. When false, the engine forces a move to cash."""
+    if not ranked:
+        return False
+    btc = next((s for s in ranked if s.base == "BTC"), None)
+    btc_up = btc.trend_up if btc else True
+    breadth = sum(1 for s in ranked if s.trend_up) / len(ranked)
+    return btc_up and breadth >= config.REGIME_BREADTH_MIN
+
+
 def _within_min_hold(pf: Portfolio, settings: Settings) -> tuple[bool, float]:
-    """(blocked, hours_remaining) — True if the position is younger than the
-    minimum hold. Used only to block coin->coin ROTATE churn, never EXIT."""
-    opened = getattr(pf, "pos_opened_at", None)
+    """(blocked, hours_remaining) — True if it's been less than min_hold_hours
+    since the last position change. Blocks ENTER and ROTATE (re-entry churn too),
+    never EXIT (protective moves to cash stay immediate)."""
+    last = getattr(pf, "last_change_at", None)
     min_h = getattr(settings, "min_hold_hours", config.MIN_HOLD_HOURS_DEFAULT)
-    if not pf.pos_base or opened is None or min_h <= 0:
+    if last is None or min_h <= 0:
         return False, 0.0
-    if opened.tzinfo is None:
-        opened = opened.replace(tzinfo=timezone.utc)
-    age_h = (datetime.now(timezone.utc) - opened).total_seconds() / 3600
+    if last.tzinfo is None:
+        last = last.replace(tzinfo=timezone.utc)
+    age_h = (datetime.now(timezone.utc) - last).total_seconds() / 3600
     return (age_h < min_h), max(min_h - age_h, 0.0)
+
+
+def _min_hold_bypassed(pf: Portfolio, ranked: List[CoinScore]) -> bool:
+    """Return True if the 6-hour lock should be lifted this cycle.
+
+    Conditions (both must hold):
+      1. The current holding's predicted edge has fallen below the bypass shelf (1.2%).
+      2. At least MIN_HOLD_BYPASS_ALTERNATIVES other scored coins are above that shelf.
+
+    When True the min-hold block is ignored and ROTATE/EXIT can proceed on the
+    next refresh, allowing the engine to escape a deteriorating position sooner."""
+    if not pf.has_position or not ranked:
+        return False
+    shelf = config.MIN_HOLD_BYPASS_SHELF_PCT
+    current = next((s for s in ranked if s.base == pf.pos_base), None)
+    current_edge = current.predicted_edge_pct if current else 0.0
+    if current_edge >= shelf:
+        return False  # holding still above shelf — lock stands
+    alternatives = [s for s in ranked if s.base != pf.pos_base and s.predicted_edge_pct > shelf]
+    return len(alternatives) >= config.MIN_HOLD_BYPASS_ALTERNATIVES
 
 
 def _execution_allowed(settings: Settings, pf: Portfolio, rec: Rec) -> tuple[bool, str]:
@@ -377,6 +434,7 @@ def _rotate_cheapest(broker, pf, sell_stat, buy_stat, settings, record) -> None:
     pf.pos_cost_basis_usd = out_value
     pf.pos_mark_price = buy_stat.last
     pf.pos_opened_at = datetime.now(timezone.utc)
+    pf.last_change_at = pf.pos_opened_at
     record(TradeResult("BUY", buy_stat.base, buy_stat.last, realized_to,
                        -out_value, None, "LIVE", tid, fee_usd=0.0))
     log.info("rotation route=convert (keep=%.4f > %.4f)", convert_keep, two_leg_keep)
