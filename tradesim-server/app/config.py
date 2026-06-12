@@ -39,11 +39,17 @@ SEED_PRODUCT_ID = "DIMO-USD"
 QUOTE_CURRENCY = "USD"
 GRANULARITY = 3600          # 1-hour candles
 FEE_RATE = 0.006            # Coinbase Advanced taker fee, low-volume tier (~0.6%/leg)
-MIN_LIQUIDITY_USD = 25_000  # minimum 24h USD volume to be a rotation candidate
+MIN_LIQUIDITY_USD = 100_000  # minimum 24h USD volume on Coinbase to be a rotation candidate
 
 STABLECOINS = {
     "USDC", "USDT", "DAI", "PYUSD", "GUSD", "USDB", "PAX", "USDP",
     "EURC", "USD", "EUR", "GBP", "TUSD", "BUSD", "USTC", "RLUSD",
+}
+
+# Tokens that have been merged, deprecated, or asset-restructured and must never be traded.
+# These are permanent exclusions beyond the dynamic veto system.
+DEPRECATED_TOKENS = {
+    "STG",  # merged into LayerZero (ZRO) at fixed 0.08634 ratio, April 2026; Binance.US/Coinmetro delisted
 }
 
 
