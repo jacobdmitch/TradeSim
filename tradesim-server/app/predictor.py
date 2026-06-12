@@ -176,9 +176,14 @@ def select_candidates(stats: List[MarketStat], rotation: RotationConfig,
     picked = list(liquid[: rotation.candidate_count])
     picked_bases = {s.base for s in picked}
     # Always include current holding for scoring (allow HOLD/EXIT even if vetoed).
-    # Force-include seed_base and BTC (regime check) if not excluded.
     force_bases = [b for b in (position_base,) if b]
-    force_bases += [b for b in (seed_base, "BTC") if b and b not in excluded]
+    # Force-include seed_base and BTC only when they clear the liquidity bar — prevents
+    # entering a thin-market position just because it's the seed token. BTC nearly
+    # always passes; seed tokens that lack real Coinbase liquidity are excluded.
+    liquid_bases = {s.base for s in stats if s.volume_usd >= min_liquidity_usd}
+    for b in (seed_base, "BTC"):
+        if b and b not in excluded and b in liquid_bases:
+            force_bases.append(b)
     for base in force_bases:
         if base not in picked_bases:
             extra = next((s for s in stats if s.base == base), None)

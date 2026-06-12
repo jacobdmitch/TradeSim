@@ -49,7 +49,7 @@ class MarketStat:
 
 
 def fetch_usd_products() -> List[Product]:
-    """All online, tradable USD products (stablecoins filtered out)."""
+    """All online, tradable USD products (stablecoins and deprecated tokens filtered out)."""
     r = _SESSION.get(f"{EXCHANGE}/products", timeout=_TIMEOUT)
     r.raise_for_status()
     out: List[Product] = []
@@ -59,6 +59,7 @@ def fetch_usd_products() -> List[Product]:
             and d.get("status") == "online"
             and not d.get("trading_disabled", False)
             and d.get("base_currency") not in config.STABLECOINS
+            and d.get("base_currency") not in config.DEPRECATED_TOKENS
         ):
             out.append(
                 Product(
@@ -87,13 +88,19 @@ def fetch_stats(products: List[Product]) -> List[MarketStat]:
         last = _to_float(w.get("last"))
         if last is None or last <= 0:
             continue
+        open_ = _to_float(w.get("open")) or last
+        high = _to_float(w.get("high")) or last
+        low = _to_float(w.get("low")) or last
+        # Basic OHLC sanity: reject obviously malformed/stale stat blobs.
+        if open_ <= 0 or high < low or high < last * 0.5 or low > last * 2.0:
+            continue
         out.append(
             MarketStat(
                 product_id=product_id,
                 base=base,
-                open=_to_float(w.get("open")) or last,
-                high=_to_float(w.get("high")) or last,
-                low=_to_float(w.get("low")) or last,
+                open=open_,
+                high=high,
+                low=low,
                 last=last,
                 volume=_to_float(w.get("volume")) or 0.0,
             )
