@@ -75,7 +75,10 @@ class StrategyConfig:
 class RotationConfig:
     candidate_count: int = 12
     momentum_lookback: int = 6
-    enter_threshold_pct: float = 0.5
+    # Raised from 0.5: at 0.6%/leg a 0.5% edge doesn't cover the 1.2% round trip,
+    # so marginal entries were pure fee burn. Every entry must clear round-trip
+    # cost with margin.
+    enter_threshold_pct: float = 2.0
     rotation_threshold_pct: float = 3.0   # raised from 1.5 to cut marginal whipsaw rotations
     exit_threshold_pct: float = -1.0
     auto_rotate: bool = True
@@ -133,6 +136,21 @@ REGIME_BREADTH_MIN = float(os.environ.get("REGIME_BREADTH_MIN", "0.5"))
 # Anti-chasing guardrails
 ANTI_RSI_MAX = float(os.environ.get("ANTI_RSI_MAX", "68"))
 ANTI_EXTENSION_MAX = float(os.environ.get("ANTI_EXTENSION_MAX", "6.0"))  # % above short SMA
+
+# ---- Breakout entry path (catch hot runs early) ----
+# A coin is a "breakout" when its short-term rate of change AND volume surge
+# clear these thresholds. Breakouts bypass the anti-chasing RSI/extension caps
+# and the SMA trend-cross requirement (which lags a fresh run by 10-20h), and
+# skip the 2-scan confirmation. The trailing stop below is the risk control
+# that replaces those entry guards.
+BREAKOUT_ROC_BARS = int(os.environ.get("BREAKOUT_ROC_BARS", "3"))                 # 1h bars in the ROC window
+BREAKOUT_ROC_MIN_PCT = float(os.environ.get("BREAKOUT_ROC_MIN_PCT", "3.0"))      # min % gain over that window
+BREAKOUT_VOL_SURGE_MIN = float(os.environ.get("BREAKOUT_VOL_SURGE_MIN", "2.0"))  # recent bar vol vs 24h avg
+BREAKOUT_RSI_HARD_MAX = float(os.environ.get("BREAKOUT_RSI_HARD_MAX", "85"))     # never buy a blow-off top
+
+# Trailing stop: exit when price falls this % below its peak since entry.
+# Locks in most of a run instead of holding until the (lagging) SMA flip.
+TRAILING_STOP_PCT = float(os.environ.get("TRAILING_STOP_PCT", "5.0"))
 
 COINBASE_API_KEY = os.environ.get("COINBASE_API_KEY", "").strip()
 # Allow the PEM to be supplied with escaped newlines.

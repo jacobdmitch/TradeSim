@@ -24,6 +24,9 @@ class CoinScore:
     rsi: Optional[float]
     trend_up: bool
     predicted_edge_pct: float
+    breakout: bool = False   # fresh run: short-term ROC + volume surge qualified
+    roc: float = 0.0         # % change over BREAKOUT_ROC_BARS bars
+    vol_surge: float = 0.0   # recent bar volume vs trailing 24h average
 
 
 @dataclass
@@ -33,6 +36,7 @@ class Recommendation:
     to_base: Optional[str]
     rationale: str
     edge_pct: float
+    strong: bool = False    # breakout-driven: engine may skip 2-scan confirmation
 
 
 class Predictor:
@@ -42,7 +46,8 @@ class Predictor:
         self.mode = mode or config.SELECTION_MODE
 
     # ---- Scoring ----
-    def score(self, stat: MarketStat, closes: List[float]) -> CoinScore:
+    def score(self, stat: MarketStat, closes: List[float],
+              vols: Optional[List[float]] = None) -> CoinScore:
         look = min(self.rotation.momentum_lookback, max(len(closes) - 1, 1))
         if len(closes) > look and closes:
             past = closes[len(closes) - 1 - look]
@@ -56,9 +61,11 @@ class Predictor:
         trend_up = short_sma > long_sma
         rsi = signals.rsi(closes, self.strategy.rsi_period)
         extension = (stat.last / short_sma - 1) * 100 if short_sma > 0 else 0.0
+        breakout, roc, vol_surge = self._breakout(closes, vols, rsi)
 
         if self.mode == "anti_chasing":
-            edge = self._edge_anti_chasing(momentum, trend_up, rsi, extension)
+            edge = self._edge_anti_chasing(momentum, trend_up, rsi, extension,
+                                           breakout, roc)
         else:
             edge = self._edge_momentum(momentum, trend_up, rsi)
 
@@ -71,7 +78,37 @@ class Predictor:
             rsi=rsi,
             trend_up=trend_up,
             predicted_edge_pct=edge,
+            breakout=breakout,
+            roc=roc,
+            vol_surge=vol_surge,
         )
+
+    @staticmethod
+    def _breakout(closes: List[float], vols: Optional[List[float]],
+                  rsi: Optional[float]) -> tuple:
+        """(is_breakout, roc_pct, vol_surge). A fresh hot run = fast short-term
+        rate of change on surging volume, before the SMA cross can confirm it.
+        Volume surge uses the max of the last two bars (the newest bar may be a
+        partial hour) against the trailing 24h average."""
+        bars = config.BREAKOUT_ROC_BARS
+        roc = 0.0
+        if len(closes) > bars and closes[-1 - bars] > 0:
+            roc = (closes[-1] / closes[-1 - bars] - 1) * 100
+
+        vol_surge = 0.0
+        if vols and len(vols) >= 4:
+            recent = max(vols[-1], vols[-2])
+            baseline = vols[-26:-2] if len(vols) >= 26 else vols[:-2]
+            avg = sum(baseline) / len(baseline) if baseline else 0.0
+            vol_surge = recent / avg if avg > 0 else 0.0
+
+        is_breakout = (
+            roc >= config.BREAKOUT_ROC_MIN_PCT
+            and vol_surge >= config.BREAKOUT_VOL_SURGE_MIN
+            and rsi is not None
+            and rsi < config.BREAKOUT_RSI_HARD_MAX
+        )
+        return is_breakout, roc, vol_surge
 
     def _edge_momentum(self, momentum, trend_up, rsi) -> float:
         edge = momentum
@@ -84,9 +121,17 @@ class Predictor:
                 edge *= 1.3                               # oversold bounce
         return edge
 
-    def _edge_anti_chasing(self, momentum, trend_up, rsi, extension) -> float:
-        # Require an established uptrend with positive drift, but NOT overbought
-        # and NOT stretched far above the short SMA (i.e., don't buy the rip).
+    def _edge_anti_chasing(self, momentum, trend_up, rsi, extension,
+                           breakout: bool = False, roc: float = 0.0) -> float:
+        # Breakout path: a fresh run qualified by ROC + volume surge. The SMA
+        # cross lags a new run by 10-20h and the RSI/extension caps reject the
+        # strong phase outright, so both are bypassed here — the trailing stop
+        # is the risk control instead. Edge = the faster of 6h momentum and
+        # short-term ROC, unpenalized.
+        if breakout:
+            return max(momentum, roc)
+        # Pullback path: require an established uptrend with positive drift,
+        # NOT overbought and NOT stretched far above the short SMA.
         # Disqualified coins get a large negative edge so they're never chosen.
         if not trend_up or momentum <= 0:
             return -999.0
@@ -99,6 +144,20 @@ class Predictor:
     def rank(self, scores: List[CoinScore]) -> List[CoinScore]:
         return sorted(scores, key=lambda s: s.predicted_edge_pct, reverse=True)
 
+    def _hold_edge(self, s: CoinScore) -> float:
+        """Edge of the coin already owned. The anti-chasing RSI/extension caps
+        are ENTRY disqualifiers — applying them to a holding forced exits and
+        rotations out of winning runs (a hot coin is overbought by definition).
+        A holding only turns bad on a trend flip or momentum fade; the trailing
+        stop in the engine handles profit protection."""
+        if self.mode != "anti_chasing":
+            return s.predicted_edge_pct
+        if s.breakout:
+            return s.predicted_edge_pct
+        if not s.trend_up or s.momentum <= 0:
+            return -999.0
+        return s.momentum
+
     # ---- Recommendation ----
     def recommend(self, ranked: List[CoinScore], position_base: Optional[str], fee_rate: float) -> Recommendation:
         round_trip_cost_pct = fee_rate * 2 * 100
@@ -108,11 +167,13 @@ class Predictor:
         if position_base is None:
             if best and best.predicted_edge_pct > self.rotation.enter_threshold_pct + fee_rate * 100:
                 sign = "+" if best.change_24h >= 0 else ""
+                what = "is breaking out" if best.breakout else "leads"
                 return Recommendation(
                     "ENTER", None, best.base,
-                    f"{best.base} leads with a {best.predicted_edge_pct:.1f}% predicted edge "
+                    f"{best.base} {what} with a {best.predicted_edge_pct:.1f}% predicted edge "
                     f"(24h {sign}{best.change_24h:.1f}%).",
                     best.predicted_edge_pct,
+                    strong=best.breakout,
                 )
             return Recommendation(
                 "HOLD", None, None,
@@ -122,7 +183,7 @@ class Predictor:
 
         # Currently holding a coin.
         current = next((s for s in ranked if s.base == position_base), None)
-        current_edge = current.predicted_edge_pct if current else 0.0
+        current_edge = self._hold_edge(current) if current else 0.0
 
         if current_edge < self.rotation.exit_threshold_pct:
             better_exists = bool(
@@ -146,6 +207,7 @@ class Predictor:
                 f"{best.base} ({best.predicted_edge_pct:.1f}%) beats {position_base} "
                 f"({current_edge:.1f}%) by more than the {round_trip_cost_pct:.1f}% round-trip cost.",
                 best.predicted_edge_pct - current_edge - round_trip_cost_pct,
+                strong=best.breakout,
             )
 
         return Recommendation(

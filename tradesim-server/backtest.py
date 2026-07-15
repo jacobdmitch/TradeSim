@@ -116,9 +116,11 @@ class Feat:
     long_sma: float
     trend_up: bool
     extension: float   # % above short SMA
+    roc3: float = 0.0  # % change over BREAKOUT_ROC_BARS bars
+    vsurge: float = 0.0  # recent bar volume vs trailing 24h average
 
 
-def feat(closes: List[float], i: int) -> Optional[Feat]:
+def feat(closes: List[float], vols: List[float], i: int) -> Optional[Feat]:
     if i < WARMUP:
         return None
     seq = closes[: i + 1]
@@ -131,12 +133,23 @@ def feat(closes: List[float], i: int) -> Optional[Feat]:
     ret24 = (price / seq[-25] - 1) * 100 if len(seq) > 25 and seq[-25] > 0 else 0.0
     mom = (price / seq[-1 - LOOK] - 1) * 100 if len(seq) > LOOK and seq[-1 - LOOK] > 0 else 0.0
     ext = (price / ssma - 1) * 100 if ssma > 0 else 0.0
-    return Feat(price, ret24, mom, rsi, ssma, lsma, ssma > lsma, ext)
+    bo_bars = config.BREAKOUT_ROC_BARS
+    roc3 = (price / seq[-1 - bo_bars] - 1) * 100 if len(seq) > bo_bars and seq[-1 - bo_bars] > 0 else 0.0
+    vseq = vols[: i + 1]
+    vsurge = 0.0
+    if len(vseq) >= 4:
+        recent = max(vseq[-1], vseq[-2])
+        baseline = vseq[-26:-2] if len(vseq) >= 26 else vseq[:-2]
+        avg = sum(baseline) / len(baseline) if baseline else 0.0
+        vsurge = recent / avg if avg > 0 else 0.0
+    return Feat(price, ret24, mom, rsi, ssma, lsma, ssma > lsma, ext, roc3, vsurge)
 
 
 # ---------- strategies: each returns the target base (or None = cash) ----------
+# A strategy may instead return (target, strong): strong=True marks a breakout-
+# grade signal that skips the 2-scan confirmation (mirrors the live engine).
 
-def strat_current(feats: Dict[str, Feat]) -> Optional[str]:
+def strat_current(feats: Dict[str, Feat], holding: Optional[str] = None) -> Optional[str]:
     # candidate pool = top 24h gainers, then momentum edge (mirrors live logic)
     pool = sorted(feats.items(), key=lambda kv: kv[1].ret24, reverse=True)[:12]
     best, best_edge = None, 0.0
@@ -154,7 +167,7 @@ def strat_current(feats: Dict[str, Feat]) -> Optional[str]:
     return best if best_edge > 1.1 else None
 
 
-def strat_anti_chasing(feats: Dict[str, Feat]) -> Optional[str]:
+def strat_anti_chasing(feats: Dict[str, Feat], holding: Optional[str] = None) -> Optional[str]:
     # established uptrend, NOT overbought, NOT stretched far above short SMA;
     # prefer the least-extended (closest to a pullback) with mild momentum.
     best, best_score = None, None
@@ -173,6 +186,55 @@ def strat_anti_chasing(feats: Dict[str, Feat]) -> Optional[str]:
     return best
 
 
+def strat_live_v2(feats: Dict[str, Feat], holding: Optional[str] = None):
+    """Mirror of the live anti_chasing + breakout predictor (app/predictor.py):
+      - breakout path: ROC + volume surge qualifies a fresh run early, bypassing
+        the SMA-cross / RSI / extension entry guards; edge = max(mom, roc)
+      - pullback path: classic anti-chasing edge
+      - hold edge: entry disqualifiers don't force exits out of a winning run
+    Returns (target, strong)."""
+    enter_th = config.RotationConfig().enter_threshold_pct
+    rotate_th = config.RotationConfig().rotation_threshold_pct
+    fee_pct = FEE * 100
+
+    def edge(f: Feat):
+        bo = (
+            f.roc3 >= config.BREAKOUT_ROC_MIN_PCT
+            and f.vsurge >= config.BREAKOUT_VOL_SURGE_MIN
+            and f.rsi is not None and f.rsi < config.BREAKOUT_RSI_HARD_MAX
+        )
+        if bo:
+            return max(f.mom, f.roc3), True
+        if (not f.trend_up or f.mom <= 0 or f.rsi is None
+                or f.rsi >= config.ANTI_RSI_MAX or f.extension > config.ANTI_EXTENSION_MAX):
+            return -999.0, False
+        return f.mom - 1.5 * max(f.extension, 0.0), False
+
+    best, best_edge, best_strong = None, None, False
+    for b, f in feats.items():
+        e, s = edge(f)
+        if best_edge is None or e > best_edge:
+            best, best_edge, best_strong = b, e, s
+
+    if holding is None:
+        if best is not None and best_edge > enter_th + fee_pct:
+            return best, best_strong
+        return None, False
+
+    f = feats.get(holding)
+    if f is None:
+        return None, False          # holding fell out of the liquid universe
+    e, s = edge(f)
+    hold_edge = e if s else (f.mom if (f.trend_up and f.mom > 0) else -999.0)
+
+    better_exists = best is not None and best != holding and best_edge > enter_th
+    if hold_edge < -1.0 and not better_exists:
+        return None, False          # trend flip / momentum fade -> cash
+    if best and best != holding and best_edge > hold_edge + rotate_th + 2 * fee_pct:
+        return best, best_strong
+    return holding, False
+
+
 def regime_ok(feats: Dict[str, Feat]) -> bool:
     """Favorable market: BTC in an uptrend AND most of the universe trending up.
     When false, the wrapper forces a move to cash (don't fight a down market)."""
@@ -184,7 +246,7 @@ def regime_ok(feats: Dict[str, Feat]) -> bool:
     return btc_up and breadth >= 0.5
 
 
-def strat_mean_reversion(feats: Dict[str, Feat]) -> Optional[str]:
+def strat_mean_reversion(feats: Dict[str, Feat], holding: Optional[str] = None) -> Optional[str]:
     # longer-term uptrend but short-term oversold -> buy the dip
     best, best_score = None, None
     for b, f in feats.items():
@@ -213,7 +275,8 @@ class Result:
 
 def run_strategy(name: str, target_fn: Callable, timeline, closes, vols,
                  start_cash: float = 100.0, min_hold_bars: int = MIN_HOLD_BARS,
-                 use_regime: bool = False, brake_all: bool = False) -> Result:
+                 use_regime: bool = False, brake_all: bool = False,
+                 trail_pct: Optional[float] = None) -> Result:
     cash, base, qty, basis = start_cash, None, 0.0, 0.0
     pending = None          # last bar's target signal (for 2-scan confirm)
     last_change = -10**9    # bar index of the last position change
@@ -222,25 +285,43 @@ def run_strategy(name: str, target_fn: Callable, timeline, closes, vols,
     equity = []
     peak = start_cash
     max_dd = 0.0
+    pos_peak = 0.0          # high-water mark of the held coin (trailing stop)
 
     n = len(timeline)
     for i in range(n):
+        # Trailing stop: immediate exit when price falls trail_pct below the
+        # peak since entry (mirrors the live engine; bypasses confirmation).
+        if trail_pct and base is not None:
+            px = closes[base][i]
+            pos_peak = max(pos_peak, px)
+            if px <= pos_peak * (1 - trail_pct / 100):
+                gross = qty * px
+                proceeds = gross * (1 - FEE)
+                fees += gross * FEE
+                cash += proceeds
+                trades += 1
+                base, qty, basis = None, 0.0, 0.0
+                pos_peak = 0.0
+                last_change = i
+
         # eligible features for liquid coins at bar i
         feats = {}
         for b in closes:
             if vols[b][i] < MIN_LIQ:
                 continue
-            f = feat(closes[b], i)
+            f = feat(closes[b], vols[b], i)
             if f is not None and f.rsi is not None:
                 feats[b] = f
-        target = target_fn(feats) if feats else None
+        res = target_fn(feats, base) if feats else None
+        target, strong = res if isinstance(res, tuple) else (res, False)
 
         # Regime filter: in an unfavorable market, force a move to cash.
         if use_regime and not regime_ok(feats):
-            target = None
+            target, strong = None, False
 
-        # 2-scan confirmation: only act when the target repeats across 2 bars
-        confirmed = (target == pending)
+        # 2-scan confirmation: only act when the target repeats across 2 bars.
+        # Strong (breakout) signals act immediately, like the live engine.
+        confirmed = (target == pending) or strong
         pending = target
 
         if confirmed and target != base:
@@ -312,6 +393,8 @@ def main():
         run_strategy("current(raw)", strat_current, timeline, closes, vols),
         run_strategy("current+rg", strat_current, timeline, closes, vols, **rg),
         run_strategy("anti+rg", strat_anti_chasing, timeline, closes, vols, **rg),
+        run_strategy("livev2+rg+trail", strat_live_v2, timeline, closes, vols,
+                     trail_pct=config.TRAILING_STOP_PCT, **rg),
         run_strategy("meanrev+rg", strat_mean_reversion, timeline, closes, vols, **rg),
         run_hold_dimo(timeline, closes),
     ]

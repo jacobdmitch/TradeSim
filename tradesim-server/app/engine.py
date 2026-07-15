@@ -86,12 +86,12 @@ def run_once(force: bool = False) -> CycleResult:
         candidates = select_candidates(stats, rotation, config.MIN_LIQUIDITY_USD,
                                         pf.pos_base, config.SEED_BASE,
                                         set(veto_excluded.keys()) if veto_excluded else None)
-        closes_map = market.fetch_closes_for([c.product_id for c in candidates])
+        series_map = market.fetch_series_for([c.product_id for c in candidates])
         scored: List[CoinScore] = []
         for stat in candidates:
-            closes = closes_map.get(stat.product_id)
+            closes, vols = series_map.get(stat.product_id, (None, None))
             if closes and len(closes) > strategy.long_sma + 1:
-                scored.append(predictor.score(stat, closes))
+                scored.append(predictor.score(stat, closes, vols))
         ranked = predictor.rank(scored)
 
         rec = predictor.recommend(ranked, pf.pos_base, config.FEE_RATE)
@@ -106,6 +106,21 @@ def run_once(force: bool = False) -> CycleResult:
                 rec = Rec("HOLD", None, None,
                           "Unfavorable market regime — staying in cash.", 0.0)
         note_parts_regime = "favorable" if regime_ok else "unfavorable"
+
+        # Trailing stop: track the high-water mark since entry and force an
+        # immediate EXIT when price falls TRAILING_STOP_PCT below it. This locks
+        # in a run's gains instead of holding until the (lagging) SMA flip.
+        if pf.has_position and pf.pos_mark_price > 0:
+            peak = max(getattr(pf, "pos_peak_price", 0.0) or 0.0, pf.pos_mark_price)
+            pf.pos_peak_price = peak
+            stop_price = peak * (1 - config.TRAILING_STOP_PCT / 100)
+            if pf.pos_mark_price <= stop_price and rec.action != "EXIT":
+                off_peak = (pf.pos_mark_price / peak - 1) * 100
+                rec = Rec("EXIT", pf.pos_base, None,
+                          f"Trailing stop: {pf.pos_base} is {off_peak:.1f}% below its "
+                          f"peak since entry (stop at -{config.TRAILING_STOP_PCT:.1f}%). "
+                          "Locking in the run.", 0.0)
+                note_parts_regime += " trailing_stop_hit"
 
         # Persist the recommendation only when it changes (matches the app).
         # Scope to the current run so the first cycle after a mode switch always
@@ -134,10 +149,14 @@ def run_once(force: bool = False) -> CycleResult:
 
         # 2-scan confirmation: ENTER/ROTATE must persist across two consecutive
         # scans before acting (kills single-cycle whipsaw). EXIT acts immediately
-        # so a protective move to cash isn't delayed.
+        # so a protective move to cash isn't delayed. Strong (breakout) signals
+        # also act immediately — waiting a full interval on a fresh run is how
+        # entries end up chasing the top.
         sig = f"{rec.action}|{rec.from_base}|{rec.to_base}"
         persisted = (settings.prev_rec_sig == sig)
-        needs_confirm = rec.action in {"ENTER", "ROTATE"}
+        needs_confirm = rec.action in {"ENTER", "ROTATE"} and not rec.strong
+        if rec.action in {"ENTER", "ROTATE"} and rec.strong:
+            note_parts.append("strong_signal:skip_confirm")
 
         # --- Execution gate ---
         if rec.action != "HOLD":
@@ -146,7 +165,7 @@ def run_once(force: bool = False) -> CycleResult:
             if not allowed:
                 note_parts.append(f"not_executed:{reason}")
             elif rec.action in {"ENTER", "ROTATE"} and hold_block:
-                if _min_hold_bypassed(pf, ranked):
+                if _min_hold_bypassed(pf, ranked, predictor):
                     note_parts.append(f"min_hold_bypassed:holding_below_shelf({config.MIN_HOLD_BYPASS_SHELF_PCT}%)")
                     # Lock lifted — still require 2-scan confirmation to guard against whipsaw.
                     if needs_confirm and not persisted:
@@ -181,7 +200,8 @@ def run_once(force: bool = False) -> CycleResult:
             {"base": c.base, "edge": round(c.predicted_edge_pct, 4),
              "momentum": round(c.momentum, 4),
              "rsi": round(c.rsi, 1) if c.rsi is not None else None,
-             "change_24h": round(c.change_24h, 4), "trend_up": c.trend_up}
+             "change_24h": round(c.change_24h, 4), "trend_up": c.trend_up,
+             "breakout": c.breakout}
             for c in ranked
         ]
         session.add(ScanLog(candidates=len(scored), note=note,
@@ -228,6 +248,7 @@ def _reconcile_live(broker: Broker, pf: Portfolio, settings: Settings, stats_by_
             pf.pos_product_id = st.product_id
             pf.pos_quantity = seed_qty
             pf.pos_mark_price = st.last
+            pf.pos_peak_price = st.last
             pf.pos_cost_basis_usd = seed_qty * st.last  # basis = value at takeover (PnL starts at 0)
             pf.pos_opened_at = datetime.now(timezone.utc)
             pf.last_change_at = pf.pos_opened_at
@@ -274,6 +295,9 @@ def _run_audit(rec: Rec, ranked: List[CoinScore], pf: Portfolio, stats_by_base,
             "rsi": round(sc.rsi, 1) if sc and sc.rsi is not None else None,
             "trend_up": sc.trend_up if sc else None,
             "predicted_edge_pct": round(sc.predicted_edge_pct, 2) if sc else None,
+            "breakout": sc.breakout if sc else None,
+            "roc_short_pct": round(sc.roc, 2) if sc else None,
+            "vol_surge_x": round(sc.vol_surge, 2) if sc else None,
         }
 
     payload = {
@@ -319,11 +343,13 @@ def _within_min_hold(pf: Portfolio, settings: Settings) -> tuple[bool, float]:
     return (age_h < min_h), max(min_h - age_h, 0.0)
 
 
-def _min_hold_bypassed(pf: Portfolio, ranked: List[CoinScore]) -> bool:
+def _min_hold_bypassed(pf: Portfolio, ranked: List[CoinScore], predictor: Predictor) -> bool:
     """Return True if the 6-hour lock should be lifted this cycle.
 
     Conditions (both must hold):
-      1. The current holding's predicted edge has fallen below the bypass shelf (1.2%).
+      1. The current holding's hold-edge has fallen below the bypass shelf (1.2%).
+         (Hold-edge, not raw edge: the raw edge carries entry-only RSI/extension
+         disqualifiers that would misread a healthy winner as deteriorating.)
       2. At least MIN_HOLD_BYPASS_ALTERNATIVES other scored coins are above that shelf.
 
     When True the min-hold block is ignored and ROTATE/EXIT can proceed on the
@@ -332,7 +358,7 @@ def _min_hold_bypassed(pf: Portfolio, ranked: List[CoinScore]) -> bool:
         return False
     shelf = config.MIN_HOLD_BYPASS_SHELF_PCT
     current = next((s for s in ranked if s.base == pf.pos_base), None)
-    current_edge = current.predicted_edge_pct if current else 0.0
+    current_edge = predictor._hold_edge(current) if current else 0.0
     if current_edge >= shelf:
         return False  # holding still above shelf — lock stands
     alternatives = [s for s in ranked if s.base != pf.pos_base and s.predicted_edge_pct > shelf]
@@ -433,6 +459,7 @@ def _rotate_cheapest(broker, pf, sell_stat, buy_stat, settings, record) -> None:
     pf.pos_quantity = realized_to
     pf.pos_cost_basis_usd = out_value
     pf.pos_mark_price = buy_stat.last
+    pf.pos_peak_price = buy_stat.last
     pf.pos_opened_at = datetime.now(timezone.utc)
     pf.last_change_at = pf.pos_opened_at
     record(TradeResult("BUY", buy_stat.base, buy_stat.last, realized_to,

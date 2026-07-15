@@ -66,6 +66,7 @@ class Portfolio(Base):
     pos_quantity: Mapped[float] = mapped_column(Float, default=0.0)
     pos_cost_basis_usd: Mapped[float] = mapped_column(Float, default=0.0)
     pos_mark_price: Mapped[float] = mapped_column(Float, default=0.0)
+    pos_peak_price: Mapped[float] = mapped_column(Float, default=0.0)  # high-water mark since entry (trailing stop)
     pos_opened_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     last_change_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)  # any position change
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
@@ -160,6 +161,7 @@ def _run_migrations() -> None:
         "portfolio": [
             ("pos_opened_at", "TIMESTAMP"),
             ("last_change_at", "TIMESTAMP"),
+            ("pos_peak_price", "FLOAT DEFAULT 0"),
         ],
         "trades": [
             ("fee_usd", "FLOAT DEFAULT 0"),

@@ -96,3 +96,52 @@ Walk-forward (return % per ~8-day window):
   margin, and worth carrying forward, but the inconsistency means it is **not yet a
   green light for live money**. The right next test is forward paper-trading
   (out-of-sample), not just more backtests.
+
+---
+
+## Update — breakout entries + trailing stop + hold-edge fix (July 2026)
+
+Live experience with anti+rg: realized P&L ≈ break-even (−$0.44) but ~$9 of a
+$23 account burned in fees. Diagnosis: the entry stack (SMA9>21 cross, RSI<68,
+extension≤6%, 2-scan confirm) lags a fresh run by 10–20h, so the bot buys the
+first eligible pullback near the top, stops out, re-enters — churn without edge.
+
+Changes (livev2 = live logic in app/predictor.py + app/engine.py):
+
+- **Breakout entry path:** 3h ROC ≥ 3% + volume ≥ 2× the 24h average + RSI < 85
+  qualifies a fresh run immediately, bypassing the SMA-cross/RSI/extension entry
+  guards and the 2-scan confirmation.
+- **Trailing stop 5%:** immediate exit when price falls 5% below its peak since
+  entry — locks in runs instead of waiting for the lagging SMA flip.
+- **Hold-edge fix:** the RSI/extension caps are entry disqualifiers only; they no
+  longer force exits/rotations out of a winning (overbought-by-definition) run.
+- **Entry bar raised 0.5% → 2.0%:** a 0.5% edge never covered the 1.2% round-trip
+  fee; marginal entries were pure fee burn.
+
+Same harness, ~27.5-day window (June–July 2026, broadly falling alt market):
+
+| variant | return | trades | fees $ | max DD |
+|---|---:|---:|---:|---:|
+| cash | 0.00% | 0 | 0.00 | 0.0% |
+| hold_dimo | −20.03% | 1 | 0.60 | 32.8% |
+| anti+rg (old live) | −24.37% | 59 | 30.41 | 27.1% |
+| **livev2+rg+trail (new live)** | **−24.74%** | **35** | **18.54** | 27.9% |
+| livev2 no-trail (ablation) | −30.54% | 35 | 17.92 | 33.4% |
+| current+rg | −66.92% | 53 | 23.58 | 68.0% |
+
+Walk-forward (livev2: −8.0 / −8.9 / −10.2 vs anti+rg: −9.7 / −9.3 / −8.5) —
+equally consistent, no single-window luck.
+
+### Read (straight)
+
+1. **The churn/fee goal is met:** 41% fewer trades and 39% lower fees for the
+   same return as the old live logic in the identical window.
+2. **The trailing stop is load-bearing:** identical entries without it lose 6
+   points more. Early entries only work with a fast mechanical exit.
+3. **This window had no sustained hot runs** — a falling market is the worst
+   case for the breakout path, and it still matched the old logic while paying
+   half the fees. The thesis (catch runs early, exit near peak) is untested in
+   an up-market window; forward paper-trading is the real test.
+4. **Nothing beat cash in this window.** The regime gate reduced damage but
+   still deployed into dead-cat bounces. Unchanged conclusion: not a green
+   light for live money.

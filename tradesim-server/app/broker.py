@@ -157,6 +157,7 @@ class Broker:
         pf.pos_quantity = usd_value / price
         pf.pos_cost_basis_usd = usd_value
         pf.pos_mark_price = price
+        pf.pos_peak_price = price
         pf.pos_opened_at = datetime.now(timezone.utc)
         pf.last_change_at = pf.pos_opened_at
 
@@ -175,6 +176,7 @@ class Broker:
             pf.pos_quantity = qty
             pf.pos_cost_basis_usd = invested
             pf.pos_mark_price = price
+            pf.pos_peak_price = price
             pf.pos_opened_at = datetime.now(timezone.utc)
             pf.last_change_at = pf.pos_opened_at
             return TradeResult("BUY", base, price, qty, -spend, None, "DRY", fee_usd=spend * self.fee_rate)
@@ -193,6 +195,7 @@ class Broker:
         pf.pos_quantity = qty
         pf.pos_cost_basis_usd = invested
         pf.pos_mark_price = avg_price
+        pf.pos_peak_price = avg_price
         pf.pos_opened_at = datetime.now(timezone.utc)
         pf.last_change_at = pf.pos_opened_at
         return TradeResult("BUY", base, avg_price, qty, -fill["filled_value"], None, "LIVE", order_id,
@@ -235,6 +238,7 @@ class Broker:
         pf.pos_quantity = 0.0
         pf.pos_cost_basis_usd = 0.0
         pf.pos_mark_price = 0.0
+        pf.pos_peak_price = 0.0
         pf.pos_opened_at = None
         pf.last_change_at = datetime.now(timezone.utc)
 
