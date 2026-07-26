@@ -8,8 +8,9 @@ downgrade it to HOLD — it can never create, enlarge, or change a trade.
 Design rules:
   - Fail-open: any error, timeout, missing key, or unparseable reply => APPROVE
     (used=False). A Claude outage must never freeze or distort trading.
-  - It audits data integrity + obvious traps + adverse news only. It is NOT a
-    price predictor; the quantitative edge stays with the deterministic engine.
+  - It audits data integrity, obvious traps, adverse news, and whether the trade
+    earns back its own fees. It is NOT a price predictor; the quantitative edge
+    stays with the deterministic engine.
 """
 from __future__ import annotations
 
@@ -49,6 +50,15 @@ _SYSTEM = (
     "  3. Adverse news: use web search to check for very recent delisting from "
     "Coinbase, hack/exploit, depeg, token merger/restructuring (e.g. fixed-ratio "
     "conversion to another token), team/rug events, or trading halts for the coin.\n"
+    "  4. Fee economics: this is a very small account, so trading costs are large "
+    "relative to the moves being chased. The 'trade_economics' block gives the "
+    "dollar cost of the action and the expected gain net of it. Veto when the "
+    "trade cannot pay for itself: expected_net_gain_usd at or below zero, fees "
+    "eating most of expected_gross_gain_usd, or a required move larger than the "
+    "coin's recent range makes plausible (compare round_trip_cost_pct against "
+    "momentum_pct, roc_short_pct and change_24h_pct). Do NOT veto a trade whose "
+    "net is solidly positive merely because fees exist, and do NOT apply this to "
+    "an EXIT — a protective move to cash is priced as a cost by design.\n"
     "Approve by default. Only veto (downgrade to HOLD) when you find a concrete, "
     "specific problem — never on vague caution. "
     'Reply with ONLY a JSON object: {"verdict":"approve"|"hold","reason":"<one short sentence>"}.'
@@ -75,8 +85,9 @@ def audit(action: str, to_base: Optional[str], from_base: Optional[str],
             + ".\n\nStrategy figures (JSON):\n"
             + json.dumps(payload, indent=2)
             + f"\n\nSearch the web for the latest news on the {coin} crypto token "
-            "(symbol may map to a project name) and audit this action. "
-            "Return only the JSON verdict."
+            "(symbol may map to a project name), then audit this action on data "
+            "integrity, liquidity, news, and whether it earns back its trading "
+            "cost. Return only the JSON verdict."
         )
         resp = client.messages.create(
             model=config.AUDIT_MODEL,

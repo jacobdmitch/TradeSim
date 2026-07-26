@@ -217,7 +217,11 @@ def strat_live_v2(feats: Dict[str, Feat], holding: Optional[str] = None):
             best, best_edge, best_strong = b, e, s
 
     if holding is None:
-        if best is not None and best_edge > enter_th + fee_pct:
+        # Entering owns the whole round trip (buy now, sell later), so the edge
+        # has to cover both legs. The live engine also applies a dollar floor on
+        # expected net profit (config.MIN_NET_PROFIT_USD); at the $100 start size
+        # used here it sits well below this gate and never binds.
+        if best is not None and best_edge > enter_th + 2 * fee_pct:
             return best, best_strong
         return None, False
 

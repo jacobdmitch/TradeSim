@@ -23,7 +23,10 @@ your balance between coins** (starting from your DIMO) to chase a profit — wit
 - **Rotation engine** — recommends **ENTER / ROTATE / EXIT / HOLD**, only acting
   when a coin's edge beats your current holding by more than the realistic
   **round-trip cost** (it routes every switch through USD and charges ~0.6% per
-  leg). The **Strategy** tab shows the ranked picks and the current call.
+  leg). The edge has to clear that cost *in dollars* as well as in percent, so a
+  5c move carrying 32c of fees is left alone; each call spells out the expected
+  gross, the fees and the net. The **Strategy** tab shows the ranked picks and
+  the current call.
 - **Trade alerts** — each new actionable recommendation fires a local push
   notification (`ROTATE DIMO → SOL`, `EXIT … → cash`, etc.).
 - **Multi-asset paper portfolio** — seeded with your **$23.17 of DIMO**, it holds
