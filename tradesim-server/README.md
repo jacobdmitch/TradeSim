@@ -97,8 +97,30 @@ uvicorn app.web:app --reload  # dashboard at http://127.0.0.1:8000
 ## Tuning
 
 Strategy parameters live in `app/config.py` (`StrategyConfig`, `RotationConfig`,
-`FEE_RATE`, `MIN_LIQUIDITY_USD`) and match the iOS app's defaults. Change the
-cron cadence in `render.yaml` (`schedule`).
+`FEE_RATE`, `MIN_LIQUIDITY_USD`, `MIN_NET_PROFIT_USD`). Change the cron cadence
+in `render.yaml` (`schedule`).
+
+## Fee gate (what makes a trade worth doing)
+
+Percent thresholds alone hide fee drag on a small balance: at ~0.6%/leg a $27
+position pays ~$0.32 per round trip, so a 0.2% "edge" is 5c of upside against
+32c of cost. Every gain-seeking action therefore has to clear its trading cost
+twice over:
+
+1. **In percent** — an ENTER needs `enter_threshold_pct` *plus the full round
+   trip* (the coin has to be sold again, so the decision owns both legs, not
+   just the entry fee). A ROTATE needs `rotation_threshold_pct` plus the round
+   trip on top of the current holding's edge.
+2. **In dollars** — expected profit after fees must be at least
+   `MIN_NET_PROFIT_USD` (default $0.25). Below that the trade is dropped to HOLD
+   and the scan note records `fee_gate:net$X<$Y`.
+
+A protective EXIT is exempt from both — moving to cash to stop a loss is priced
+as a cost, not a profit — but its fee is still reported in the rationale.
+
+The same numbers (traded value, fee legs, estimated fee, expected gross and net)
+are handed to the Claude pre-trade audit, which can veto an action that cannot
+pay for itself.
 
 ## Rotation routing (fee minimization)
 

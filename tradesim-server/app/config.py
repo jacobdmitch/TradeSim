@@ -41,6 +41,14 @@ GRANULARITY = 3600          # 1-hour candles
 FEE_RATE = 0.006            # Coinbase Advanced taker fee, low-volume tier (~0.6%/leg)
 MIN_LIQUIDITY_USD = 100_000  # minimum 24h USD volume on Coinbase to be a rotation candidate
 
+# Fee floor in real money. Percent thresholds alone hide fee drag on a small
+# account: at 0.6%/leg a $27 position pays ~$0.32 per round trip, so a 0.2%
+# "edge" is 5c of upside against 32c of cost. ENTER and ROTATE must therefore
+# clear their own round-trip cost by at least this many dollars of expected
+# profit — otherwise the engine holds. Raise it to trade less and only on
+# meaningful moves; the % thresholds below stay in force either way.
+MIN_NET_PROFIT_USD = _f("MIN_NET_PROFIT_USD", 0.25)
+
 STABLECOINS = {
     "USDC", "USDT", "DAI", "PYUSD", "GUSD", "USDB", "PAX", "USDP",
     "EURC", "USD", "EUR", "GBP", "TUSD", "BUSD", "USTC", "RLUSD",

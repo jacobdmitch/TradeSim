@@ -17,7 +17,9 @@ from .db import (
     AuditLog, EquitySnapshot, Portfolio, Recommendation, ScanLog, Settings, SessionLocal,
     get_portfolio, get_settings, get_veto_excluded_bases, init_db,
 )
-from .predictor import CoinScore, Predictor, Recommendation as Rec, select_candidates
+from .predictor import (
+    CoinScore, Predictor, Recommendation as Rec, select_candidates, trade_economics,
+)
 
 log = logging.getLogger("tradesim.engine")
 
@@ -94,7 +96,7 @@ def run_once(force: bool = False) -> CycleResult:
                 scored.append(predictor.score(stat, closes, vols))
         ranked = predictor.rank(scored)
 
-        rec = predictor.recommend(ranked, pf.pos_base, config.FEE_RATE)
+        rec = predictor.recommend(ranked, pf.pos_base, config.FEE_RATE, pf.total_value)
 
         # Regime gate: in an unfavorable market, don't deploy — sit in cash.
         regime_ok = _regime_ok(ranked)
@@ -144,6 +146,11 @@ def run_once(force: bool = False) -> CycleResult:
         executed: List[TradeResult] = []
         note_parts = [f"mode={'DRY' if settings.dry_run else 'LIVE'}",
                       f"enabled={settings.enabled}", f"regime={note_parts_regime}"]
+        if rec.fee_blocked and rec.economics is not None:
+            # The move qualified on percent but not in real money — record why.
+            note_parts.append(
+                f"fee_gate:net${rec.economics.net_gain_usd:.2f}<${config.MIN_NET_PROFIT_USD:.2f}"
+            )
         if veto_excluded:
             note_parts.append(f"veto_excluded:{','.join(sorted(veto_excluded.keys()))}")
 
@@ -300,10 +307,24 @@ def _run_audit(rec: Rec, ranked: List[CoinScore], pf: Portfolio, stats_by_base,
             "vol_surge_x": round(sc.vol_surge, 2) if sc else None,
         }
 
+    # Engine-built recommendations (regime exit, trailing stop) carry no
+    # economics of their own — price the leg so the audit still sees the cost.
+    econ = rec.economics or trade_economics(
+        pf.total_value, 1 if rec.action == "EXIT" else 2, 0.0, config.FEE_RATE)
+
     payload = {
         "action": rec.action,
         "rationale": rec.rationale,
         "fee_per_leg_pct": config.FEE_RATE * 100,
+        "trade_economics": {
+            "account_value_usd": round(econ.trade_value_usd, 2),
+            "fee_legs_charged": econ.fee_legs,
+            "estimated_fee_usd": round(econ.fee_usd, 2),
+            "expected_gross_gain_usd": round(econ.gross_gain_usd, 2),
+            "expected_net_gain_usd": round(econ.net_gain_usd, 2),
+            "round_trip_cost_pct": round(config.FEE_RATE * 2 * 100, 2),
+            "min_net_profit_usd": config.MIN_NET_PROFIT_USD,
+        },
         "target": snap(rec.to_base) if rec.to_base else None,
         "current_holding": snap(rec.from_base) if rec.from_base else None,
     }

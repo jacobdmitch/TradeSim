@@ -30,6 +30,35 @@ class CoinScore:
 
 
 @dataclass
+class TradeEconomics:
+    """What acting is actually worth in dollars at the current account size.
+
+    Percent edges hide fee drag on a small balance — a 0.2% edge on $27 is 5c of
+    upside against 32c of round-trip fees — so every gain-seeking action is
+    checked against these numbers, not just against the percent thresholds."""
+    trade_value_usd: float
+    fee_legs: int
+    fee_usd: float
+    gross_gain_usd: float
+    net_gain_usd: float
+
+
+def trade_economics(account_value_usd: float, fee_legs: int, edge_pct: float,
+                    fee_rate: float) -> TradeEconomics:
+    """Dollar cost/benefit of a pending action.
+
+    `fee_legs` is 2 for ENTER and ROTATE — the position has to be sold again, so
+    the decision owns the whole round trip — and 1 for a protective EXIT.
+    `edge_pct` is the expected advantage of acting: the target's edge for ENTER,
+    the edge gained over the current holding for ROTATE, and 0 for an EXIT, which
+    is taken to avoid a loss rather than to book a gain."""
+    value = max(account_value_usd, 0.0)
+    fee = value * fee_rate * fee_legs
+    gross = value * edge_pct / 100.0
+    return TradeEconomics(value, fee_legs, fee, gross, gross - fee)
+
+
+@dataclass
 class Recommendation:
     action: str             # ENTER | ROTATE | EXIT | HOLD
     from_base: Optional[str]
@@ -37,6 +66,8 @@ class Recommendation:
     rationale: str
     edge_pct: float
     strong: bool = False    # breakout-driven: engine may skip 2-scan confirmation
+    economics: Optional[TradeEconomics] = None
+    fee_blocked: bool = False  # cleared the % thresholds but not the dollar floor
 
 
 class Predictor:
@@ -159,21 +190,43 @@ class Predictor:
         return s.momentum
 
     # ---- Recommendation ----
-    def recommend(self, ranked: List[CoinScore], position_base: Optional[str], fee_rate: float) -> Recommendation:
+    def recommend(self, ranked: List[CoinScore], position_base: Optional[str],
+                  fee_rate: float, account_value_usd: float = 0.0) -> Recommendation:
+        """Pick the action. Every gain-seeking action has to clear its own
+        trading cost twice over: once in percent (the rotation thresholds plus
+        the round trip) and once in dollars (`MIN_NET_PROFIT_USD` of expected
+        profit after fees), so a technically-qualifying edge that only amounts
+        to pennies on this account never turns into a trade."""
         round_trip_cost_pct = fee_rate * 2 * 100
+        min_net_usd = config.MIN_NET_PROFIT_USD
         best = ranked[0] if ranked else None
 
         # Currently in cash.
         if position_base is None:
-            if best and best.predicted_edge_pct > self.rotation.enter_threshold_pct + fee_rate * 100:
+            # Entering commits to a round trip — the coin has to be sold again —
+            # so the edge must cover both legs, not just the entry fee.
+            if best and best.predicted_edge_pct > self.rotation.enter_threshold_pct + round_trip_cost_pct:
+                econ = trade_economics(account_value_usd, 2, best.predicted_edge_pct, fee_rate)
+                if econ.net_gain_usd < min_net_usd:
+                    return Recommendation(
+                        "HOLD", None, None,
+                        f"{best.base}'s {best.predicted_edge_pct:.1f}% edge is only "
+                        f"${econ.gross_gain_usd:.2f} on ${econ.trade_value_usd:.2f}; "
+                        f"${econ.fee_usd:.2f} of fees leaves ${econ.net_gain_usd:.2f}, under the "
+                        f"${min_net_usd:.2f} minimum. Not worth the trade — staying in cash.",
+                        best.predicted_edge_pct, economics=econ, fee_blocked=True,
+                    )
                 sign = "+" if best.change_24h >= 0 else ""
                 what = "is breaking out" if best.breakout else "leads"
                 return Recommendation(
                     "ENTER", None, best.base,
                     f"{best.base} {what} with a {best.predicted_edge_pct:.1f}% predicted edge "
-                    f"(24h {sign}{best.change_24h:.1f}%).",
+                    f"(24h {sign}{best.change_24h:.1f}%): ~${econ.gross_gain_usd:.2f} on "
+                    f"${econ.trade_value_usd:.2f} less ${econ.fee_usd:.2f} round-trip fees "
+                    f"= ${econ.net_gain_usd:.2f} net.",
                     best.predicted_edge_pct,
                     strong=best.breakout,
+                    economics=econ,
                 )
             return Recommendation(
                 "HOLD", None, None,
@@ -191,23 +244,44 @@ class Predictor:
                 and best.predicted_edge_pct > self.rotation.enter_threshold_pct
             )
             if not better_exists:
+                # Protective, so it isn't gated on expected profit — but the cost
+                # of the leg is still reported for the audit and the log.
+                econ = trade_economics(account_value_usd, 1, 0.0, fee_rate)
                 return Recommendation(
                     "EXIT", position_base, None,
                     f"{position_base} outlook turned negative ({current_edge:.1f}%). "
-                    f"Move to cash to protect value.",
-                    current_edge,
+                    f"Move to cash to protect value (${econ.fee_usd:.2f} exit fee).",
+                    current_edge, economics=econ,
                 )
 
         if (
             best and best.base != position_base
             and best.predicted_edge_pct > current_edge + self.rotation.rotation_threshold_pct + round_trip_cost_pct
         ):
+            # Floor the holding's edge at 0 for the dollar math: a disqualified
+            # holding scores -999, which would otherwise project an absurd gain.
+            gain_pct = best.predicted_edge_pct - max(current_edge, 0.0)
+            econ = trade_economics(account_value_usd, 2, gain_pct, fee_rate)
+            net_edge_pct = best.predicted_edge_pct - current_edge - round_trip_cost_pct
+            if econ.net_gain_usd < min_net_usd:
+                return Recommendation(
+                    "HOLD", position_base, None,
+                    f"{best.base} ({best.predicted_edge_pct:.1f}%) beats {position_base} "
+                    f"({current_edge:.1f}%), but only by ${econ.gross_gain_usd:.2f} on "
+                    f"${econ.trade_value_usd:.2f}; ${econ.fee_usd:.2f} of rotation fees leaves "
+                    f"${econ.net_gain_usd:.2f}, under the ${min_net_usd:.2f} minimum. "
+                    f"Holding {position_base}.",
+                    net_edge_pct, economics=econ, fee_blocked=True,
+                )
             return Recommendation(
                 "ROTATE", position_base, best.base,
                 f"{best.base} ({best.predicted_edge_pct:.1f}%) beats {position_base} "
-                f"({current_edge:.1f}%) by more than the {round_trip_cost_pct:.1f}% round-trip cost.",
-                best.predicted_edge_pct - current_edge - round_trip_cost_pct,
+                f"({current_edge:.1f}%) by more than the {round_trip_cost_pct:.1f}% round-trip cost: "
+                f"~${econ.gross_gain_usd:.2f} of edge on ${econ.trade_value_usd:.2f} less "
+                f"${econ.fee_usd:.2f} fees = ${econ.net_gain_usd:.2f} net.",
+                net_edge_pct,
                 strong=best.breakout,
+                economics=econ,
             )
 
         return Recommendation(
