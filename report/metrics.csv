@@ -1,2 +1,2 @@
 repo,primary_language,total_loc,code_files,merged_prs,commits,contributors,avg_loc_per_pr,median_loc_per_pr,pct_simple_prs,pct_standard_prs,pct_rich_prs,pct_prs_with_issue_ref,functions_est,classes_est,test_to_code_ratio_pct,pct_untested_files,comment_ratio_pct,license,first_commit,last_commit,sample_files
-TradeSim,Python,7184,42,7,35,2,357.6,103,0.0,28.6,71.4,100.0,107,71,2.2,100.0,7.4,copyleft,2026-05-30,2026-07-26,tradesim-server/app/broker.py; tradesim-server/app/db.py; tradesim-server/backtest.py
+TradeSim,Python,7184,42,7,36,2,357.6,103,0.0,28.6,71.4,100.0,107,71,2.2,100.0,7.4,copyleft,2026-05-30,2026-08-12,tradesim-server/app/broker.py; tradesim-server/app/db.py; tradesim-server/backtest.py

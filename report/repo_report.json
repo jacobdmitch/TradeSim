@@ -1,12 +1,12 @@
 {
   "repo_name": "TradeSim",
-  "generated_at": "2026-08-12T23:07:06Z",
+  "generated_at": "2026-08-13T00:14:57Z",
   "note": "Metrics, highlights, code excerpts and sample PRs. CONTAINS REAL CODE (excerpts and diff hunks) with secret-shaped values redacted \u2014 review before sharing, or re-run with --no-excerpts for a metrics-only report.",
   "contains_code": true,
   "highlights": [
     "7,184 lines across 42 code files. Primary language Python. Mix: Python 46%, Swift 41%, Shell 13%.",
-    "35 commits by 2 contributors, 2026-05-30 to 2026-07-26.",
-    "35 commits in the last 12 months (freshness / activity signal).",
+    "36 commits by 2 contributors, 2026-05-30 to 2026-08-12.",
+    "36 commits in the last 12 months (freshness / activity signal).",
     "7 merged PRs; sampled mix 0.0% simple / 28.6% standard / 71.4% rich.",
     "100.0% of sampled PRs reference an issue in the commit body.",
     "Test-to-code ratio 2.2% (1 test files); ~100.0% of source files have no matching test.",
@@ -37,11 +37,11 @@
     "files_with_pii_keywords": 0
   },
   "history": {
-    "commits": 35,
+    "commits": 36,
     "contributors": 2,
     "first_commit": "2026-05-30",
-    "last_commit": "2026-07-26",
-    "commits_last_365d": 35,
+    "last_commit": "2026-08-12",
+    "commits_last_365d": 36,
     "merged_prs_est": 7,
     "pr_sample_analyzed": 7,
     "avg_loc_per_pr": 357.6,
@@ -104,6 +104,32 @@
       "classes_est": 2
     }
   ],
+  "timeline_monthly": {
+    "months": [
+      "2026-05",
+      "2026-06",
+      "2026-07",
+      "2026-08"
+    ],
+    "commits": [
+      30,
+      2,
+      3,
+      1
+    ],
+    "authors": [
+      2,
+      2,
+      2,
+      1
+    ],
+    "merges": [
+      5,
+      1,
+      1,
+      0
+    ]
+  },
   "code_excerpts": [
     {
       "path": "tradesim-server/app/broker.py",
@@ -200,5 +226,21 @@
     "secret_pattern_hits": {},
     "files_with_pii_keywords": 0,
     "action": "Remove secrets and any customer PII from the working tree AND git history before sharing."
+  },
+  "deliverable": {
+    "pdf_engine": null,
+    "zip": "TradeSim-report.zip",
+    "contents": [
+      "report.html",
+      "report.md",
+      "metrics.xlsx",
+      "metrics.csv",
+      "repo_report.json",
+      "chart-activity.svg",
+      "chart-composition.svg",
+      "chart-contributors.svg",
+      "chart-languages.svg",
+      "chart-pr_tiers.svg"
+    ]
   }
 }

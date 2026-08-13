@@ -1,43 +1,29 @@
-# Repository report — TradeSim
-
-*Generated 2026-08-13 from the local git checkout.*
-
-## Highlights
-
-- 7,184 lines across 42 code files. Primary language Python. Mix: Python 46%, Swift 41%, Shell 13%.
-- 36 commits by 2 contributors, 2026-05-30 to 2026-08-12.
-- 36 commits in the last 12 months (freshness / activity signal).
-- 7 merged PRs; sampled mix 0.0% simple / 28.6% standard / 71.4% rich.
-- 100.0% of sampled PRs reference an issue in the commit body.
-- Test-to-code ratio 2.2% (1 test files); ~100.0% of source files have no matching test.
-- Build: CI configured (.github/workflows).
-- License: copyleft.
-- ~107 functions and ~71 classes/types (regex estimate).
-
-## Code metrics
-
-| Metric | Value |
-|---|---|
-| Primary language | Python |
-| Total LoC | 7,184 across 42 code files |
-| Merged PRs / Commits | 7 / 36 |
-| PR mix (Simple/Standard/Rich) | 0.0% / 28.6% / 71.4% |
-| Avg / median LoC per PR | 358 / 103 |
-| % PRs referencing an issue | 100.0% |
-| Test-to-code / % untested files | 2.2% / 100.0% |
-| Functions / Classes (est.) | 107 / 71 |
-| Contributors | 2 |
-| History | 2026-05-30 → 2026-08-12 |
-| License | copyleft |
-
-
-## Representative code
-
-**`tradesim-server/app/broker.py`** — Python, lines 246–285 of 333
-
-```python
-    def _place_market(self, product_id: str, side: str,
-                      quote_size: Optional[str] = None, base_size: Optional[str] = None) -> str:
+<!doctype html><html><head><meta charset='utf-8'><style>
+@page{size:A4;margin:14mm 12mm}
+body{font:10pt/1.45 -apple-system,"Helvetica Neue",Arial,sans-serif;color:#1a1a1a;margin:0}
+h1{font-size:19pt;margin:0 0 1mm;letter-spacing:-.3pt}
+.sub{color:#6d685f;font-size:8.5pt;margin-bottom:5mm}
+h2{font-size:8.4pt;letter-spacing:.11em;text-transform:uppercase;color:#0d6e62;font-weight:700;
+   margin:6mm 0 2mm;padding-bottom:.8mm;border-bottom:.5pt solid #ddd8d2;page-break-after:avoid}
+ul{margin:1mm 0 3mm;padding-left:5mm}li{margin:.8mm 0;font-size:9pt}
+table{border-collapse:collapse;width:100%;font-size:8.4pt;margin:1mm 0 3mm}
+th,td{text-align:left;padding:1mm 2mm;border-bottom:.4pt solid #e4e0da}
+th{background:#f4f2ef;font-size:7pt;text-transform:uppercase;letter-spacing:.04em;color:#6d685f}
+td:first-child{color:#6d685f}
+.charts{display:grid;grid-template-columns:1fr 1fr;gap:4mm;margin:2mm 0 3mm}
+.wide{grid-column:1/-1}
+.card{border:.4pt solid #e4e0da;border-radius:1.5mm;padding:2mm 2.5mm;page-break-inside:avoid}
+.ct{font:7pt sans-serif;fill:#6d685f;letter-spacing:.06em;text-transform:uppercase;font-weight:700}
+.ax{font:6.4pt sans-serif;fill:#8a857e}.gr{stroke:#eceae6;stroke-width:.5}
+pre{background:#f7f5f2;border:.4pt solid #e0dcd6;border-left:2pt solid #0d6e62;border-radius:1.2mm;
+  padding:1.8mm 2.5mm;font:6.9pt/1.32 Menlo,Consolas,monospace;white-space:pre-wrap;word-wrap:break-word;
+  margin:1mm 0 2.5mm;page-break-inside:avoid}
+pre.diff{border-left-color:#2f5aa8}
+.f{font-size:7.6pt;color:#6d685f;font-style:italic;margin-top:4mm}
+.warn{background:#fbe4e2;border-left:2pt solid #b3261e;padding:1.5mm 2.5mm;border-radius:1.2mm;font-size:8.4pt}
+.ok{background:#e3f2e9;border-left:2pt solid #1a7f4b;padding:1.5mm 2.5mm;border-radius:1.2mm;font-size:8.4pt}
+</style></head><body><h1>Repository report — TradeSim</h1><div class='sub'>Generated 2026-08-13 from the local git checkout.</div><h2>Highlights</h2><ul><li>7,184 lines across 42 code files. Primary language Python. Mix: Python 46%, Swift 41%, Shell 13%.</li><li>36 commits by 2 contributors, 2026-05-30 to 2026-08-12.</li><li>36 commits in the last 12 months (freshness / activity signal).</li><li>7 merged PRs; sampled mix 0.0% simple / 28.6% standard / 71.4% rich.</li><li>100.0% of sampled PRs reference an issue in the commit body.</li><li>Test-to-code ratio 2.2% (1 test files); ~100.0% of source files have no matching test.</li><li>Build: CI configured (.github/workflows).</li><li>License: copyleft.</li><li>~107 functions and ~71 classes/types (regex estimate).</li></ul><h2>Activity</h2><div class='charts'><div class='card wide'><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 200" width="100%"><text x="0" y="11" class="ct">Commits and merged PRs per month</text><line x1="46" y1="24.0" x2="748" y2="24.0" class="gr"/><text x="40" y="27.0" class="ax" text-anchor="end">30</text><line x1="46" y1="99.0" x2="748" y2="99.0" class="gr"/><text x="40" y="102.0" class="ax" text-anchor="end">15</text><line x1="46" y1="174.0" x2="748" y2="174.0" class="gr"/><text x="40" y="177.0" class="ax" text-anchor="end">0</text><polygon points="46,174 46.0,24.0 280.0,164.0 514.0,159.0 748.0,169.0 748,174" fill="#0d6e62" opacity=".10"/><polyline points="46.0,24.0 280.0,164.0 514.0,159.0 748.0,169.0" fill="none" stroke="#0d6e62" stroke-width="1.6"/><polygon points="46,174 46.0,149.0 280.0,169.0 514.0,169.0 748.0,174.0 748,174" fill="#2f5aa8" opacity=".10"/><polyline points="46.0,149.0 280.0,169.0 514.0,169.0 748.0,174.0" fill="none" stroke="#2f5aa8" stroke-width="1.6"/><text x="46.0" y="191" class="ax" text-anchor="middle">2026-05</text><text x="280.0" y="191" class="ax" text-anchor="middle">2026-06</text><text x="514.0" y="191" class="ax" text-anchor="middle">2026-07</text><text x="748.0" y="191" class="ax" text-anchor="middle">2026-08</text><rect x="628" y="4" width="8" height="3" fill="#0d6e62"/><text x="639" y="7.5" class="ax">commits</text><rect x="680" y="4" width="8" height="3" fill="#2f5aa8"/><text x="691" y="7.5" class="ax">merged PRs</text></svg></div><div class='card wide'><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 200" width="100%"><text x="0" y="11" class="ct">Active contributors per month</text><line x1="46" y1="24.0" x2="748" y2="24.0" class="gr"/><text x="40" y="27.0" class="ax" text-anchor="end">2</text><line x1="46" y1="99.0" x2="748" y2="99.0" class="gr"/><text x="40" y="102.0" class="ax" text-anchor="end">1</text><line x1="46" y1="174.0" x2="748" y2="174.0" class="gr"/><text x="40" y="177.0" class="ax" text-anchor="end">0</text><polygon points="46,174 46.0,24.0 280.0,24.0 514.0,24.0 748.0,99.0 748,174" fill="#b4531a" opacity=".10"/><polyline points="46.0,24.0 280.0,24.0 514.0,24.0 748.0,99.0" fill="none" stroke="#b4531a" stroke-width="1.6"/><text x="46.0" y="191" class="ax" text-anchor="middle">2026-05</text><text x="280.0" y="191" class="ax" text-anchor="middle">2026-06</text><text x="514.0" y="191" class="ax" text-anchor="middle">2026-07</text><text x="748.0" y="191" class="ax" text-anchor="middle">2026-08</text><rect x="649" y="4" width="8" height="3" fill="#b4531a"/><text x="660" y="7.5" class="ax">distinct authors</text></svg></div><div class='card'><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 370 92" width="100%"><text x="0" y="11" class="ct">Lines by language</text><text x="86" y="37" class="ax" text-anchor="end">Python</text><rect x="92" y="26" width="232.0" height="13" fill="#0d6e62" rx="1.5"/><text x="329.0" y="37" class="ax">3,298</text><text x="86" y="57" class="ax" text-anchor="end">Swift</text><rect x="92" y="46" width="207.0" height="13" fill="#0d6e62" rx="1.5"/><text x="304.0" y="57" class="ax">2,942</text><text x="86" y="77" class="ax" text-anchor="end">Shell</text><rect x="92" y="66" width="66.4" height="13" fill="#0d6e62" rx="1.5"/><text x="163.4" y="77" class="ax">944</text></svg></div><div class='card'><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 370 92" width="100%"><text x="0" y="11" class="ct">PR complexity mix</text><text x="86" y="37" class="ax" text-anchor="end">Simple</text><rect x="92" y="26" width="1.0" height="13" fill="#2f5aa8" rx="1.5"/><text x="97.0" y="37" class="ax">0%</text><text x="86" y="57" class="ax" text-anchor="end">Standard</text><rect x="92" y="46" width="92.9" height="13" fill="#2f5aa8" rx="1.5"/><text x="189.9" y="57" class="ax">29%</text><text x="86" y="77" class="ax" text-anchor="end">Rich</text><rect x="92" y="66" width="232.0" height="13" fill="#2f5aa8" rx="1.5"/><text x="329.0" y="77" class="ax">71%</text></svg></div><div class='card'><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 370 92" width="100%"><text x="0" y="11" class="ct">Line composition</text><text x="86" y="37" class="ax" text-anchor="end">Code</text><rect x="92" y="26" width="232.0" height="13" fill="#b4531a" rx="1.5"/><text x="329.0" y="37" class="ax">5,834</text><text x="86" y="57" class="ax" text-anchor="end">Comments</text><rect x="92" y="46" width="18.5" height="13" fill="#b4531a" rx="1.5"/><text x="115.5" y="57" class="ax">465</text><text x="86" y="77" class="ax" text-anchor="end">Tests</text><rect x="92" y="66" width="6.3" height="13" fill="#b4531a" rx="1.5"/><text x="103.3" y="77" class="ax">158</text></svg></div></div><h2>Metrics</h2><table><tr><th>Metric</th><th>Value</th></tr><tr><td>Primary language</td><td>Python</td></tr><tr><td>Total LoC</td><td>7,184 across 42 files</td></tr><tr><td>Merged PRs / Commits</td><td>7 / 36</td></tr><tr><td>PR mix (Simple/Standard/Rich)</td><td>0.0% / 28.6% / 71.4%</td></tr><tr><td>Avg / median LoC per PR</td><td>358 / 103</td></tr><tr><td>% PRs referencing an issue</td><td>100.0%</td></tr><tr><td>Test-to-code / untested files</td><td>2.2% / 100.0%</td></tr><tr><td>Functions / Classes (est.)</td><td>107 / 71</td></tr><tr><td>Contributors</td><td>2</td></tr><tr><td>History</td><td>2026-05-30 → 2026-08-12</td></tr><tr><td>License</td><td>copyleft</td></tr><tr><td>CI / reproducible build</td><td>.github/workflows / none</td></tr></table><h2>Representative code</h2><p style='font-size:8.4pt'><b>tradesim-server/app/broker.py</b> — Python, lines 246–285 of 333</p><pre>    def _place_market(self, product_id: str, side: str,
+                      quote_size: Optional[str] = None, base_size: Optional[str] = None) -&gt; str:
         coid = uuid.uuid4().hex
         if side == "BUY":
             resp = self._client.market_order_buy(client_order_id=coid, product_id=product_id, quote_size=quote_size)
@@ -59,7 +45,7 @@
             raise BrokerError(f"Coinbase order accepted but no order_id returned: {data}")
         return oid
 
-    def _fill(self, order_id: str, attempts: int = 6, delay: float = 1.0) -> dict:
+    def _fill(self, order_id: str, attempts: int = 6, delay: float = 1.0) -&gt; dict:
         """Poll the order until filled; return normalized fill numbers."""
         last = {}
         for _ in range(attempts):
@@ -75,13 +61,7 @@
                 "status": status, "filled_size": filled_size, "filled_value": filled_value,
                 "fees": fees, "avg_price": avg_price,
             }
-            if status in {"FILLED", "DONE"} and filled_size > 0:
-```
-
-**`tradesim-server/app/db.py`** — Python, lines 147–186 of 267
-
-```python
-def _run_migrations() -> None:
+            if status in {"FILLED", "DONE"} and filled_size &gt; 0:</pre><p style='font-size:8.4pt'><b>tradesim-server/app/db.py</b> — Python, lines 147–186 of 267</p><pre>def _run_migrations() -&gt; None:
     """Idempotently add columns introduced after a DB was first created.
     create_all() makes new tables but never alters existing ones."""
     from sqlalchemy import inspect, text
@@ -118,44 +98,38 @@ def _run_migrations() -> None:
                     conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}"))
 
 
-def init_db() -> None:
+def init_db() -&gt; None:
     """Create tables and seed the singleton control rows if missing."""
-    Base.metadata.create_all(ENGINE)
-```
-
-**`tradesim-server/backtest.py`** — Python, lines 123–162 of 437
-
-```python
-def feat(closes: List[float], vols: List[float], i: int) -> Optional[Feat]:
-    if i < WARMUP:
+    Base.metadata.create_all(ENGINE)</pre><p style='font-size:8.4pt'><b>tradesim-server/backtest.py</b> — Python, lines 123–162 of 437</p><pre>def feat(closes: List[float], vols: List[float], i: int) -&gt; Optional[Feat]:
+    if i &lt; WARMUP:
         return None
     seq = closes[: i + 1]
     price = seq[-1]
-    if price <= 0:
+    if price &lt;= 0:
         return None
     ssma = signals.sma(seq, SHORT) or 0.0
     lsma = signals.sma(seq, LONG) or 0.0
     rsi = signals.rsi(seq, RSI_P)
-    ret24 = (price / seq[-25] - 1) * 100 if len(seq) > 25 and seq[-25] > 0 else 0.0
-    mom = (price / seq[-1 - LOOK] - 1) * 100 if len(seq) > LOOK and seq[-1 - LOOK] > 0 else 0.0
-    ext = (price / ssma - 1) * 100 if ssma > 0 else 0.0
+    ret24 = (price / seq[-25] - 1) * 100 if len(seq) &gt; 25 and seq[-25] &gt; 0 else 0.0
+    mom = (price / seq[-1 - LOOK] - 1) * 100 if len(seq) &gt; LOOK and seq[-1 - LOOK] &gt; 0 else 0.0
+    ext = (price / ssma - 1) * 100 if ssma &gt; 0 else 0.0
     bo_bars = config.BREAKOUT_ROC_BARS
-    roc3 = (price / seq[-1 - bo_bars] - 1) * 100 if len(seq) > bo_bars and seq[-1 - bo_bars] > 0 else 0.0
+    roc3 = (price / seq[-1 - bo_bars] - 1) * 100 if len(seq) &gt; bo_bars and seq[-1 - bo_bars] &gt; 0 else 0.0
     vseq = vols[: i + 1]
     vsurge = 0.0
-    if len(vseq) >= 4:
+    if len(vseq) &gt;= 4:
         recent = max(vseq[-1], vseq[-2])
-        baseline = vseq[-26:-2] if len(vseq) >= 26 else vseq[:-2]
+        baseline = vseq[-26:-2] if len(vseq) &gt;= 26 else vseq[:-2]
         avg = sum(baseline) / len(baseline) if baseline else 0.0
-        vsurge = recent / avg if avg > 0 else 0.0
-    return Feat(price, ret24, mom, rsi, ssma, lsma, ssma > lsma, ext, roc3, vsurge)
+        vsurge = recent / avg if avg &gt; 0 else 0.0
+    return Feat(price, ret24, mom, rsi, ssma, lsma, ssma &gt; lsma, ext, roc3, vsurge)
 
 
 # ---------- strategies: each returns the target base (or None = cash) ----------
 # A strategy may instead return (target, strong): strong=True marks a breakout-
 # grade signal that skips the 2-scan confirmation (mirrors the live engine).
 
-def strat_current(feats: Dict[str, Feat], holding: Optional[str] = None) -> Optional[str]:
+def strat_current(feats: Dict[str, Feat], holding: Optional[str] = None) -&gt; Optional[str]:
     # candidate pool = top 24h gainers, then momentum edge (mirrors live logic)
     pool = sorted(feats.items(), key=lambda kv: kv[1].ret24, reverse=True)[:12]
     best, best_edge = None, 0.0
@@ -164,19 +138,8 @@ def strat_current(feats: Dict[str, Feat], holding: Optional[str] = None) -> Opti
         if not f.trend_up:
             edge *= 0.3
         if f.rsi is not None:
-            if f.rsi >= 70:
-                edge *= 0.4
-```
-
-## Sample pull requests
-
-**Merge pull request #7 from jacobdmitch/claude/trading-engine-fees-decision-retknm**
-
-- 2026-07-26 · 7 files · +196/-24 · linked issue
-- files: `TradeSim/Services/Predictor.swift`, `tradesim-server/app/auditor.py`, `tradesim-server/app/config.py`, `tradesim-server/app/engine.py`, `tradesim-server/app/predictor.py`
-
-```diff
-diff --git a/TradeSim/Services/Predictor.swift b/TradeSim/Services/Predictor.swift
+            if f.rsi &gt;= 70:
+                edge *= 0.4</pre><h2>Sample pull requests</h2><p style='font-size:8.4pt'><b>Merge pull request #7 from jacobdmitch/claude/trading-engine-fees-decision-retknm</b><br>2026-07-26 · 7 files · +196/-24 · linked issue</p><pre class='diff'>diff --git a/TradeSim/Services/Predictor.swift b/TradeSim/Services/Predictor.swift
 --- a/TradeSim/Services/Predictor.swift
 +++ b/TradeSim/Services/Predictor.swift
 @@ -10,4 +10,9 @@ struct Predictor {
@@ -198,7 +161,7 @@ diff --git a/TradeSim/Services/Predictor.swift b/TradeSim/Services/Predictor.swi
 +    /// again, so the decision owns the whole round trip — and 1 for an exit.
 +    /// `edgePct` is the expected advantage of acting.
 +    private func economics(value: Double, feeLegs: Int, edgePct: Double,
-+                           feeRate: Double) -> (fee: Double, gross: Double, net: Double) {
++                           feeRate: Double) -&gt; (fee: Double, gross: Double, net: Double) {
 +        let tradeValue = max(value, 0)
 +        let fee = tradeValue * feeRate * Double(feeLegs)
 +        let gross = tradeValue * edgePct / 100
@@ -212,19 +175,19 @@ diff --git a/TradeSim/Services/Predictor.swift b/TradeSim/Services/Predictor.swi
 +    /// percent (the thresholds plus the round trip) and once in dollars
 +    /// (`minNetProfitUSD` of expected profit after fees), so an edge that
 +    /// technically qualifies but only amounts to pennies never becomes a trade.
-     func recommend(ranked: [CoinScore], portfolio: Portfolio, feeRate: Double) -> RotationRecommendation {
+     func recommend(ranked: [CoinScore], portfolio: Portfolio, feeRate: Double) -&gt; RotationRecommendation {
          let roundTripCostPct = feeRate * 2 * 100
 +        let accountValue = portfolio.totalValue
          let best = ranked.first
  
          // Currently in cash — look for a coin worth deploying into.
          guard let position = portfolio.position else {
--            if let best, best.predictedEdgePct > config.enterThresholdPct + feeRate * 100 {
+-            if let best, best.predictedEdgePct &gt; config.enterThresholdPct + feeRate * 100 {
 +            // Entering commits to a round trip, so the edge must cover both legs.
-+            if let best, best.predictedEdgePct > config.enterThresholdPct + roundTripCostPct {
++            if let best, best.predictedEdgePct &gt; config.enterThresholdPct + roundTripCostPct {
 +                let e = economics(value: accountValue, feeLegs: 2,
 +                                  edgePct: best.predictedEdgePct, feeRate: feeRate)
-+                if e.net < minNetProfitUSD {
++                if e.net &lt; minNetProfitUSD {
 +                    return RotationRecommendation(
 +                        action: .hold, fromBase: nil, toBase: nil,
 +                        rationale: String(format: "%@'s %.1f%% edge is only $%.2f on $%.2f; $%.2f of fees leaves $%.2f, under the $%.2f minimum. Not worth the trade — staying in cash.",
@@ -235,18 +198,7 @@ diff --git a/TradeSim/Services/Predictor.swift b/TradeSim/Services/Predictor.swi
                  return RotationRecommendation(
                      action: .enter, fromBase: nil, toBase: best.base,
 -                    rationale: String(format: "%@ leads with a %.1f%% predicted edge (24h %@%.1f%%).",
-+                    rationale: String(format: "%@ leads with a %.1f%% predicted edge (24h %@%.1f%%): ~$%.2f on $%.2f less $%.2f round-trip fees = $%.2f net.",
-
-… diff truncated …
-```
-
-**Merge pull request #6 from jacobdmitch/claude/trading-model-data-integrity-5kp431**
-
-- 2026-06-12 · 4 files · +35/-11 · linked issue
-- files: `tradesim-server/app/auditor.py`, `tradesim-server/app/config.py`, `tradesim-server/app/market.py`, `tradesim-server/app/predictor.py`
-
-```diff
-diff --git a/tradesim-server/app/auditor.py b/tradesim-server/app/auditor.py
++                    rationale: String(format: "%@ leads with a %.1f%% predicted edge (24h %@%.1f%%): ~$%.2f on $%.2f less $%.2f round-trip fees = $%.2f net.",</pre><p style='font-size:8.4pt'><b>Merge pull request #6 from jacobdmitch/claude/trading-model-data-integrity-5kp431</b><br>2026-06-12 · 4 files · +35/-11 · linked issue</p><pre class='diff'>diff --git a/tradesim-server/app/auditor.py b/tradesim-server/app/auditor.py
 --- a/tradesim-server/app/auditor.py
 +++ b/tradesim-server/app/auditor.py
 @@ -40,8 +40,14 @@ _SYSTEM = (
@@ -294,29 +246,18 @@ diff --git a/tradesim-server/app/market.py b/tradesim-server/app/market.py
 +++ b/tradesim-server/app/market.py
 @@ -50,5 +50,5 @@ class MarketStat:
  
- def fetch_usd_products() -> List[Product]:
+ def fetch_usd_products() -&gt; List[Product]:
 -    """All online, tradable USD products (stablecoins filtered out)."""
 +    """All online, tradable USD products (stablecoins and deprecated tokens filtered out)."""
      r = _SESSION.get(f"{EXCHANGE}/products", timeout=_TIMEOUT)
      r.raise_for_status()
-@@ -60,4 +60,5 @@ def fetch_usd_products() -> List[Product]:
+@@ -60,4 +60,5 @@ def fetch_usd_products() -&gt; List[Product]:
              and not d.get("trading_disabled", False)
              and d.get("base_currency") not in config.STABLECOINS
 +            and d.get("base_currency") not in config.DEPRECATED_TOKENS
          ):
              out.append(
-@@ -88,11 +89,17 @@ def fetch_stats(products: List[Product]) -> List[MarketStat]:
-
-… diff truncated …
-```
-
-**Merge pull request #5 from jacobdmitch/claude/token-exclusion-auditor-vetos-2TZ3j**
-
-- 2026-05-31 · 5 files · +94/-9 · linked issue
-- files: `tradesim-server/app/config.py`, `tradesim-server/app/db.py`, `tradesim-server/app/engine.py`, `tradesim-server/app/predictor.py`, `tradesim-server/app/web.py`
-
-```diff
-diff --git a/tradesim-server/app/config.py b/tradesim-server/app/config.py
+@@ -88,11 +89,17 @@ def fetch_stats(products: List[Product]) -&gt; List[MarketStat]:</pre><p style='font-size:8.4pt'><b>Merge pull request #5 from jacobdmitch/claude/token-exclusion-auditor-vetos-2TZ3j</b><br>2026-05-31 · 5 files · +94/-9 · linked issue</p><pre class='diff'>diff --git a/tradesim-server/app/config.py b/tradesim-server/app/config.py
 --- a/tradesim-server/app/config.py
 +++ b/tradesim-server/app/config.py
 @@ -109,4 +109,7 @@ CRON_GRANULARITY_MIN = 15  # must match render.yaml cron schedule
@@ -335,21 +276,21 @@ diff --git a/tradesim-server/app/db.py b/tradesim-server/app/db.py
      min_hold_hours: Mapped[int] = mapped_column(Integer, default=6)      # min hold before rotating
 +    veto_exclusion_hours: Mapped[int] = mapped_column(Integer, default=24)  # hours a token is banned after 2 consecutive vetos
      # Dashboard only shows history (trades/recs/equity/scans/audits) at or after
-     # this time; advanced on each deliberate DRY-RUN<->LIVE switch to start fresh.
-@@ -154,4 +155,5 @@ def _run_migrations() -> None:
+     # this time; advanced on each deliberate DRY-RUN&lt;-&gt;LIVE switch to start fresh.
+@@ -154,4 +155,5 @@ def _run_migrations() -&gt; None:
              ("min_hold_hours", "INTEGER DEFAULT 6"),
              ("history_since", "TIMESTAMP"),
 +            ("veto_exclusion_hours", "INTEGER DEFAULT 24"),
          ],
          "portfolio": [
-@@ -205,4 +207,33 @@ def get_portfolio(session) -> Portfolio:
+@@ -205,4 +207,33 @@ def get_portfolio(session) -&gt; Portfolio:
  
  
-+def get_veto_excluded_bases(session, exclusion_hours: int) -> dict:
++def get_veto_excluded_bases(session, exclusion_hours: int) -&gt; dict:
 +    """Return {base: expires_at} for tokens with 2 consecutive AI Auditor vetos
 +    whose most recent veto falls within the exclusion window."""
 +    from datetime import timedelta
-+    if exclusion_hours <= 0:
++    if exclusion_hours &lt;= 0:
 +        return {}
 +    now = _now()
 +    cutoff = now - timedelta(hours=exclusion_hours)
@@ -369,19 +310,10 @@ diff --git a/tradesim-server/app/db.py b/tradesim-server/app/db.py
 +            latest_ts = recent[0].ts
 +            if latest_ts.tzinfo is None:
 +                latest_ts = latest_ts.replace(tzinfo=timezone.utc)
-+            if latest_ts >= cutoff:
++            if latest_ts &gt;= cutoff:
 +                result[base] = latest_ts + timedelta(hours=exclusion_hours)
 +    return result
 +
 +
- def reset_for_mode_switch(session, *, to_live: bool) -> None:
-     """Re-baseline the account when the operator deliberately switches between
-
-… diff truncated …
-```
-
-## Cleanup before sharing
-
-**Clean.** No secret patterns or PII keywords detected in tracked files.
-
-*Contains real code excerpts and diff hunks (secret-shaped values redacted). % Rich PRs is a lower bound — review threads live on the code host, not in git. Function and class counts are regex estimates.*
+ def reset_for_mode_switch(session, *, to_live: bool) -&gt; None:
+     """Re-baseline the account when the operator deliberately switches between</pre><h2>Hygiene</h2><div class='ok'><b>Clean.</b> No secret patterns or PII keywords in tracked files.</div><p class='f'>Contains real code excerpts and diff hunks (secret-shaped values redacted). % Rich PRs is a lower bound — review threads live on the code host, not in git. Function and class counts are regex estimates.</p></body></html>
