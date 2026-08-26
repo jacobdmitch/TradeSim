@@ -128,7 +128,8 @@ final class TradeSimModel {
                 holdingCandles = candles
             }
 
-            let rec = predictor.recommend(ranked: scores, portfolio: portfolio, feeRate: 0.006)
+            var rec = predictor.recommend(ranked: scores, portfolio: portfolio, feeRate: 0.006)
+            rec.traceID = UUID()  // one id for this scan's recommendation and any trade it causes
             register(rec)
 
             lastUpdated = Date()
@@ -189,19 +190,21 @@ final class TradeSimModel {
         switch rec.action {
         case .enter:
             if let toBase = rec.toBase, let s = stat(forBase: toBase),
-               let t = simulator.enter(base: toBase, productID: s.productID, price: s.last, portfolio: &portfolio) {
+               let t = simulator.enter(base: toBase, productID: s.productID, price: s.last,
+                                       portfolio: &portfolio, traceID: rec.traceID) {
                 trades.insert(t, at: 0)
             }
         case .exit:
             if let pos = portfolio.position, let s = stat(forBase: pos.base),
-               let t = simulator.exit(price: s.last, portfolio: &portfolio) {
+               let t = simulator.exit(price: s.last, portfolio: &portfolio, traceID: rec.traceID) {
                 trades.insert(t, at: 0)
             }
         case .rotate:
             if let pos = portfolio.position, let toBase = rec.toBase, pos.base != toBase,
                let sell = stat(forBase: pos.base), let buy = stat(forBase: toBase) {
                 let legs = simulator.rotate(toBase: toBase, toProductID: buy.productID,
-                                            sellPrice: sell.last, buyPrice: buy.last, portfolio: &portfolio)
+                                            sellPrice: sell.last, buyPrice: buy.last, portfolio: &portfolio,
+                                            traceID: rec.traceID)
                 for t in legs.reversed() { trades.insert(t, at: 0) }
             }
         case .hold:

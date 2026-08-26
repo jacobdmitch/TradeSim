@@ -186,15 +186,13 @@ def strat_anti_chasing(feats: Dict[str, Feat], holding: Optional[str] = None) ->
     return best
 
 
-def strat_live_v2(feats: Dict[str, Feat], holding: Optional[str] = None):
-    """Mirror of the live anti_chasing + breakout predictor (app/predictor.py):
-      - breakout path: ROC + volume surge qualifies a fresh run early, bypassing
-        the SMA-cross / RSI / extension entry guards; edge = max(mom, roc)
-      - pullback path: classic anti-chasing edge
-      - hold edge: entry disqualifiers don't force exits out of a winning run
-    Returns (target, strong)."""
-    enter_th = config.RotationConfig().enter_threshold_pct
-    rotate_th = config.RotationConfig().rotation_threshold_pct
+def make_live_v2(enter_th: Optional[float] = None, rotate_th: Optional[float] = None) -> Callable:
+    """Build a strat_live_v2-shaped target function bound to specific enter/
+    rotate thresholds, defaulting to the live config's. Lets app/improve.py
+    backtest nearby parameter variants through the same execution harness
+    without changing run_strategy's (feats, holding) calling convention."""
+    _enter_th = config.RotationConfig().enter_threshold_pct if enter_th is None else enter_th
+    _rotate_th = config.RotationConfig().rotation_threshold_pct if rotate_th is None else rotate_th
     fee_pct = FEE * 100
 
     def edge(f: Feat):
@@ -210,33 +208,46 @@ def strat_live_v2(feats: Dict[str, Feat], holding: Optional[str] = None):
             return -999.0, False
         return f.mom - 1.5 * max(f.extension, 0.0), False
 
-    best, best_edge, best_strong = None, None, False
-    for b, f in feats.items():
+    def strat(feats: Dict[str, Feat], holding: Optional[str] = None):
+        """Mirror of the live anti_chasing + breakout predictor (app/predictor.py):
+          - breakout path: ROC + volume surge qualifies a fresh run early, bypassing
+            the SMA-cross / RSI / extension entry guards; edge = max(mom, roc)
+          - pullback path: classic anti-chasing edge
+          - hold edge: entry disqualifiers don't force exits out of a winning run
+        Returns (target, strong)."""
+        best, best_edge, best_strong = None, None, False
+        for b, f in feats.items():
+            e, s = edge(f)
+            if best_edge is None or e > best_edge:
+                best, best_edge, best_strong = b, e, s
+
+        if holding is None:
+            # Entering owns the whole round trip (buy now, sell later), so the edge
+            # has to cover both legs. The live engine also applies a dollar floor on
+            # expected net profit (config.MIN_NET_PROFIT_USD); at the $100 start size
+            # used here it sits well below this gate and never binds.
+            if best is not None and best_edge > _enter_th + 2 * fee_pct:
+                return best, best_strong
+            return None, False
+
+        f = feats.get(holding)
+        if f is None:
+            return None, False          # holding fell out of the liquid universe
         e, s = edge(f)
-        if best_edge is None or e > best_edge:
-            best, best_edge, best_strong = b, e, s
+        hold_edge = e if s else (f.mom if (f.trend_up and f.mom > 0) else -999.0)
 
-    if holding is None:
-        # Entering owns the whole round trip (buy now, sell later), so the edge
-        # has to cover both legs. The live engine also applies a dollar floor on
-        # expected net profit (config.MIN_NET_PROFIT_USD); at the $100 start size
-        # used here it sits well below this gate and never binds.
-        if best is not None and best_edge > enter_th + 2 * fee_pct:
+        better_exists = best is not None and best != holding and best_edge > _enter_th
+        if hold_edge < -1.0 and not better_exists:
+            return None, False          # trend flip / momentum fade -> cash
+        if best and best != holding and best_edge > hold_edge + _rotate_th + 2 * fee_pct:
             return best, best_strong
-        return None, False
+        return holding, False
 
-    f = feats.get(holding)
-    if f is None:
-        return None, False          # holding fell out of the liquid universe
-    e, s = edge(f)
-    hold_edge = e if s else (f.mom if (f.trend_up and f.mom > 0) else -999.0)
+    return strat
 
-    better_exists = best is not None and best != holding and best_edge > enter_th
-    if hold_edge < -1.0 and not better_exists:
-        return None, False          # trend flip / momentum fade -> cash
-    if best and best != holding and best_edge > hold_edge + rotate_th + 2 * fee_pct:
-        return best, best_strong
-    return holding, False
+
+# Default instance backtest against the live config's current thresholds.
+strat_live_v2 = make_live_v2()
 
 
 def regime_ok(feats: Dict[str, Feat]) -> bool:

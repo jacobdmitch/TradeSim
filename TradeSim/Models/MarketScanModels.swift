@@ -72,6 +72,11 @@ struct RotationRecommendation: Identifiable, Codable, Hashable {
     let rationale: String
     let edgePct: Double       // predicted advantage of acting, net of fees
     let timestamp: Date
+    /// Id shared with any SimulatedTrade(s) executed from this recommendation,
+    /// so a trade can be traced back to the scan that produced it. Set by
+    /// TradeSimModel.scan() after the predictor returns; defaults to a fresh
+    /// id so existing call sites in Predictor.swift don't need to change.
+    var traceID = UUID()
 }
 
 /// Tunable parameters for the cross-market rotation strategy.

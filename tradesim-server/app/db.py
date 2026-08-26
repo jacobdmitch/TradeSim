@@ -97,6 +97,10 @@ class Trade(Base):
     fee_usd: Mapped[float] = mapped_column(Float, default=0.0)   # trading cost on this leg
     mode: Mapped[str] = mapped_column(String(8), default="DRY")  # DRY | LIVE
     order_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    # Id shared by every row (scan/recommendation/audit/trade/equity) written
+    # during the same run_once() cycle, so a trade can be traced back to the
+    # scan and reasoning that produced it.
+    trace_id: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, index=True)
 
 
 class Recommendation(Base):
@@ -108,6 +112,7 @@ class Recommendation(Base):
     to_base: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     rationale: Mapped[str] = mapped_column(Text)
     edge_pct: Mapped[float] = mapped_column(Float)
+    trace_id: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, index=True)
 
 
 class ScanLog(Base):
@@ -119,6 +124,7 @@ class ScanLog(Base):
     error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     # JSON list of the ranked candidates this scan weighed (for the dashboard popup).
     candidates_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    trace_id: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, index=True)
 
 
 class EquitySnapshot(Base):
@@ -130,6 +136,7 @@ class EquitySnapshot(Base):
     cash: Mapped[float] = mapped_column(Float, default=0.0)
     position_value: Mapped[float] = mapped_column(Float, default=0.0)
     holding: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    trace_id: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, index=True)
 
 
 class AuditLog(Base):
@@ -142,6 +149,35 @@ class AuditLog(Base):
     verdict: Mapped[str] = mapped_column(String(12))        # APPROVE | VETO
     reason: Mapped[str] = mapped_column(Text)
     model: Mapped[Optional[str]] = mapped_column(String(48), nullable=True)
+    trace_id: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, index=True)
+
+
+class StrategyParams(Base):
+    """Singleton row (id=1) of the live-tunable rotation thresholds. Read by the
+    engine each cycle; written only by the self-improvement loop (app/improve.py)
+    or a future dashboard control. Distinct from Settings (runtime/ops knobs)."""
+    __tablename__ = "strategy_params"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    enter_threshold_pct: Mapped[float] = mapped_column(Float, default=2.0)
+    rotation_threshold_pct: Mapped[float] = mapped_column(Float, default=3.0)
+    exit_threshold_pct: Mapped[float] = mapped_column(Float, default=-1.0)
+    trailing_stop_pct: Mapped[float] = mapped_column(Float, default=5.0)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+
+class StrategyChangeLog(Base):
+    """Audit trail: every parameter change the self-improvement loop makes,
+    with the metric that justified it. This is what makes "fully automated"
+    tuning reviewable and reversible after the fact."""
+    __tablename__ = "strategy_changes"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    param: Mapped[str] = mapped_column(String(32))
+    old_value: Mapped[float] = mapped_column(Float)
+    new_value: Mapped[float] = mapped_column(Float)
+    reason: Mapped[str] = mapped_column(Text)
+    metric_before: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    metric_after: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
 
 def _run_migrations() -> None:
@@ -165,9 +201,20 @@ def _run_migrations() -> None:
         ],
         "trades": [
             ("fee_usd", "FLOAT DEFAULT 0"),
+            ("trace_id", "VARCHAR(32)"),
         ],
         "scans": [
             ("candidates_json", "TEXT"),
+            ("trace_id", "VARCHAR(32)"),
+        ],
+        "recommendations": [
+            ("trace_id", "VARCHAR(32)"),
+        ],
+        "equity": [
+            ("trace_id", "VARCHAR(32)"),
+        ],
+        "audits": [
+            ("trace_id", "VARCHAR(32)"),
         ],
     }
     for table, cols_to_add in adds.items():
@@ -199,11 +246,24 @@ def init_db() -> None:
             ))
         if s.get(Portfolio, 1) is None:
             s.add(Portfolio(id=1, cash=config.STARTING_BALANCE_DEFAULT))
+        if s.get(StrategyParams, 1) is None:
+            rc = config.RotationConfig()
+            s.add(StrategyParams(
+                id=1,
+                enter_threshold_pct=rc.enter_threshold_pct,
+                rotation_threshold_pct=rc.rotation_threshold_pct,
+                exit_threshold_pct=rc.exit_threshold_pct,
+                trailing_stop_pct=config.TRAILING_STOP_PCT,
+            ))
         s.commit()
 
 
 def get_settings(session) -> Settings:
     return session.get(Settings, 1)
+
+
+def get_strategy_params(session) -> StrategyParams:
+    return session.get(StrategyParams, 1)
 
 
 def get_portfolio(session) -> Portfolio:

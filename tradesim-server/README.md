@@ -12,19 +12,28 @@ money until you explicitly flip both switches from the dashboard.
 ## Architecture
 
 - **Cron job** (`run_cycle.py`) — runs one cycle every 10 minutes: pull Coinbase
-  market data, score candidates, decide, and (if enabled) place orders.
+  market data, score candidates, decide, and (if enabled) place orders. Every
+  row it writes that cycle (scan, recommendation, audit, trade, equity) shares
+  a `trace_id`, so a trade can be traced back to the scan/reasoning behind it.
+- **Tuning cron job** (`run_improve.py`) — runs once a day: backtests the live
+  rotation thresholds against recent market history and, if a nearby variant
+  clearly beats them, nudges them (bounded step, logged, never touches the
+  kill switch or dry-run/live). See "Tracing & self-improvement" below.
 - **Web service** (`app/web.py`) — dashboard: portfolio, P&L, trade log,
   recommendation history, and the controls (kill switch, dry-run/live, run-now).
   Tap the candidate count under the recommendation to see the ranked shortlist
   the last scan weighed. Tuned for iPhone: open it in Safari and **Share → Add
   to Home Screen** to run it full-screen as a standalone web app with the icon.
-- **Postgres** — stores settings, the portfolio, trades, recommendations, scans.
+- **Postgres** — stores settings, the portfolio, trades, recommendations, scans,
+  and the strategy-tuning history.
 
 ```
 tradesim-server/
   run_cycle.py        # cron entrypoint
+  run_improve.py      # daily tuning-loop cron entrypoint
   run_web.py          # web entrypoint (uvicorn app.web:app)
-  render.yaml         # Render blueprint (db + cron + web)
+  backtest.py         # backtesting harness, also used by the tuning loop
+  render.yaml         # Render blueprint (db + cron + tuning cron + web)
   app/
     config.py         # strategy params + env-driven runtime settings
     market.py         # Coinbase public data (port of MarketDataService.swift)
@@ -33,6 +42,7 @@ tradesim-server/
     broker.py         # dry-run + live order execution
     db.py             # SQLAlchemy models (Postgres / local SQLite)
     engine.py         # one full cycle, with kill switch + balance floor
+    improve.py        # self-improvement loop: backtest, decide, log, apply
     web.py            # FastAPI dashboard
     static/           # web app icons + favicon (Add to Home Screen)
 ```
@@ -96,9 +106,36 @@ uvicorn app.web:app --reload  # dashboard at http://127.0.0.1:8000
 
 ## Tuning
 
-Strategy parameters live in `app/config.py` (`StrategyConfig`, `RotationConfig`,
-`FEE_RATE`, `MIN_LIQUIDITY_USD`, `MIN_NET_PROFIT_USD`). Change the cron cadence
-in `render.yaml` (`schedule`).
+Most strategy parameters live in `app/config.py` (`StrategyConfig`,
+`FEE_RATE`, `MIN_LIQUIDITY_USD`, `MIN_NET_PROFIT_USD`). The four rotation
+thresholds — `enter_threshold_pct`, `rotation_threshold_pct`,
+`exit_threshold_pct`, `trailing_stop_pct` — instead live in the DB
+(`StrategyParams`, a singleton row) so the self-improvement loop can retune
+them; see below. Change the cron cadence in `render.yaml` (`schedule`).
+
+## Tracing & self-improvement
+
+Every row written during a trading cycle (scan, recommendation, audit,
+trade, equity snapshot) carries the same `trace_id`, so a trade can be
+traced back end-to-end to the scan and reasoning that produced it —
+join on `trace_id` across the `scans`/`recommendations`/`audits`/`trades`/
+`equity` tables, or filter `/api/state`'s `trades`/`latest_recommendation`
+by it.
+
+A separate daily cron (`run_improve.py` → `app/improve.py`) closes the loop:
+it backtests the live rotation thresholds against recent real market history
+(reusing `backtest.py`'s walk-forward harness), then backtests a small
+neighborhood of nearby variants. If one clearly and consistently beats what's
+live — by a minimum margin, scored on the worst walk-forward segment so a
+lucky single window can't win — it nudges `StrategyParams` a bounded step
+toward it (never a jump) and logs the change (old value, new value, the
+metrics that justified it) to `StrategyChangeLog`, shown on the dashboard
+under "Strategy tuning". Each parameter has a hard-coded min/max range and a
+24h cooldown between changes.
+
+This loop can only retune existing thresholds — it never touches the
+`TRADING_ENABLED`/`DRY_RUN` kill switches, so it can't turn trading on or
+take it live on its own.
 
 ## Fee gate (what makes a trade worth doing)
 

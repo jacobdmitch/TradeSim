@@ -50,6 +50,23 @@ services:
       - key: AUDIT_MODEL
         value: "claude-haiku-4-5-20251001"
 
+  # ---- Self-improvement: backtests the live rotation thresholds against
+  # recent market history once a day and, if warranted, nudges them. Never
+  # touches TRADING_ENABLED/DRY_RUN — see app/improve.py for the guardrails.
+  - type: cron
+    name: tradesim-improve
+    runtime: python
+    plan: starter
+    rootDir: tradesim-server
+    schedule: "17 7 * * *"     # once daily
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python run_improve.py"
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: tradesim-db
+          property: connectionString
+
   # ---- The dashboard ----
   - type: web
     name: tradesim-dashboard
