@@ -56,4 +56,7 @@ struct SimulatedTrade: Identifiable, Codable, Hashable {
     let timestamp: Date
     /// Realized profit/loss for a closing (sell) trade, if known.
     let realizedPnL: Double?
+    /// The scan/recommendation that produced this trade, for trace
+    /// correlation. Nil for a manually-initiated trade (not algorithm-driven).
+    var traceID: UUID? = nil
 }

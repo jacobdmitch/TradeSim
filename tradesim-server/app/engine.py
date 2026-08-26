@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import List, Optional
@@ -15,7 +16,7 @@ from . import auditor, config, market
 from .broker import Broker, TradeResult
 from .db import (
     AuditLog, EquitySnapshot, Portfolio, Recommendation, ScanLog, Settings, SessionLocal,
-    get_portfolio, get_settings, get_veto_excluded_bases, init_db,
+    get_portfolio, get_settings, get_strategy_params, get_veto_excluded_bases, init_db,
 )
 from .predictor import (
     CoinScore, Predictor, Recommendation as Rec, select_candidates, trade_economics,
@@ -37,6 +38,9 @@ class CycleResult:
 def run_once(force: bool = False) -> CycleResult:
     init_db()
     session = SessionLocal()
+    # One id for every row (scan/recommendation/audit/trade/equity) this cycle
+    # writes, so a trade can be traced back to the scan/reasoning that produced it.
+    trace_id = uuid.uuid4().hex
     try:
         settings: Settings = get_settings(session)
         pf: Portfolio = get_portfolio(session)
@@ -53,7 +57,18 @@ def run_once(force: bool = False) -> CycleResult:
                                        f"skipped: {elapsed_min:.0f}/{interval}min cadence")
 
         strategy = config.StrategyConfig()
-        rotation = config.RotationConfig()
+        # Rotation thresholds and the trailing stop are DB-tunable: the
+        # self-improvement loop (app/improve.py) writes bounded, logged updates
+        # to StrategyParams; this cycle just reads whatever is live right now.
+        sp = get_strategy_params(session)
+        rotation = (
+            config.RotationConfig(
+                enter_threshold_pct=sp.enter_threshold_pct,
+                rotation_threshold_pct=sp.rotation_threshold_pct,
+                exit_threshold_pct=sp.exit_threshold_pct,
+            ) if sp else config.RotationConfig()
+        )
+        trailing_stop_pct = sp.trailing_stop_pct if sp else config.TRAILING_STOP_PCT
         predictor = Predictor(strategy, rotation)
 
         # --- Market scan ---
@@ -115,12 +130,12 @@ def run_once(force: bool = False) -> CycleResult:
         if pf.has_position and pf.pos_mark_price > 0:
             peak = max(getattr(pf, "pos_peak_price", 0.0) or 0.0, pf.pos_mark_price)
             pf.pos_peak_price = peak
-            stop_price = peak * (1 - config.TRAILING_STOP_PCT / 100)
+            stop_price = peak * (1 - trailing_stop_pct / 100)
             if pf.pos_mark_price <= stop_price and rec.action != "EXIT":
                 off_peak = (pf.pos_mark_price / peak - 1) * 100
                 rec = Rec("EXIT", pf.pos_base, None,
                           f"Trailing stop: {pf.pos_base} is {off_peak:.1f}% below its "
-                          f"peak since entry (stop at -{config.TRAILING_STOP_PCT:.1f}%). "
+                          f"peak since entry (stop at -{trailing_stop_pct:.1f}%). "
                           "Locking in the run.", 0.0)
                 note_parts_regime += " trailing_stop_hit"
 
@@ -140,7 +155,7 @@ def run_once(force: bool = False) -> CycleResult:
         if changed:
             session.add(Recommendation(
                 action=rec.action, from_base=rec.from_base, to_base=rec.to_base,
-                rationale=rec.rationale, edge_pct=rec.edge_pct,
+                rationale=rec.rationale, edge_pct=rec.edge_pct, trace_id=trace_id,
             ))
 
         executed: List[TradeResult] = []
@@ -178,11 +193,11 @@ def run_once(force: bool = False) -> CycleResult:
                     if needs_confirm and not persisted:
                         note_parts.append("awaiting_confirmation:1of2")
                     else:
-                        audit_res = _run_audit(rec, ranked, pf, stats_by_base, settings, session)
+                        audit_res = _run_audit(rec, ranked, pf, stats_by_base, settings, session, trace_id)
                         if audit_res is not None and audit_res.used and not audit_res.approved:
                             note_parts.append(f"audit_veto:{audit_res.reason[:80]}")
                         else:
-                            executed = _execute(broker, rec, pf, stats_by_base, session, settings)
+                            executed = _execute(broker, rec, pf, stats_by_base, session, settings, trace_id)
                             note_parts.append(f"executed={[t.action for t in executed]}")
                 else:
                     note_parts.append(f"min_hold:{hold_remaining:.1f}h_left")
@@ -190,11 +205,11 @@ def run_once(force: bool = False) -> CycleResult:
                 note_parts.append("awaiting_confirmation:1of2")
             else:
                 # Optional Claude pre-trade audit (veto-only, fail-open).
-                audit_res = _run_audit(rec, ranked, pf, stats_by_base, settings, session)
+                audit_res = _run_audit(rec, ranked, pf, stats_by_base, settings, session, trace_id)
                 if audit_res is not None and audit_res.used and not audit_res.approved:
                     note_parts.append(f"audit_veto:{audit_res.reason[:80]}")
                 else:
-                    executed = _execute(broker, rec, pf, stats_by_base, session, settings)
+                    executed = _execute(broker, rec, pf, stats_by_base, session, settings, trace_id)
                     note_parts.append(f"executed={[t.action for t in executed]}")
 
         # Remember this scan's recommendation for next time's confirmation check.
@@ -212,10 +227,11 @@ def run_once(force: bool = False) -> CycleResult:
             for c in ranked
         ]
         session.add(ScanLog(candidates=len(scored), note=note,
-                            candidates_json=json.dumps(cand_payload)))
+                            candidates_json=json.dumps(cand_payload), trace_id=trace_id))
         session.add(EquitySnapshot(
             total_value=pf.total_value, cash=pf.cash,
             position_value=pf.position_value, holding=pf.pos_base or "USD",
+            trace_id=trace_id,
         ))
         session.commit()
         return CycleResult(True, rec, executed, len(scored), note)
@@ -224,7 +240,7 @@ def run_once(force: bool = False) -> CycleResult:
         log.exception("cycle failed")
         try:
             session.rollback()
-            session.add(ScanLog(candidates=0, note="error", error=str(e)))
+            session.add(ScanLog(candidates=0, note="error", error=str(e), trace_id=trace_id))
             session.commit()
         except Exception:
             pass
@@ -280,7 +296,7 @@ def _reconcile_live(broker: Broker, pf: Portfolio, settings: Settings, stats_by_
 
 
 def _run_audit(rec: Rec, ranked: List[CoinScore], pf: Portfolio, stats_by_base,
-               settings: Settings, session):
+               settings: Settings, session, trace_id: Optional[str] = None):
     """Run the optional Claude audit and log the verdict. Returns AuditResult or None."""
     if not getattr(settings, "audit_enabled", False):
         return None
@@ -334,7 +350,7 @@ def _run_audit(rec: Rec, ranked: List[CoinScore], pf: Portfolio, stats_by_base,
         session.add(AuditLog(
             action=rec.action, to_base=rec.to_base,
             verdict="VETO" if not res.approved else "APPROVE",
-            reason=res.reason[:500], model=res.model,
+            reason=res.reason[:500], model=res.model, trace_id=trace_id,
         ))
     return res
 
@@ -395,7 +411,8 @@ def _execution_allowed(settings: Settings, pf: Portfolio, rec: Rec) -> tuple[boo
     return True, "ok"
 
 
-def _execute(broker: Broker, rec: Rec, pf: Portfolio, stats_by_base, session, settings) -> List[TradeResult]:
+def _execute(broker: Broker, rec: Rec, pf: Portfolio, stats_by_base, session, settings,
+            trace_id: Optional[str] = None) -> List[TradeResult]:
     results: List[TradeResult] = []
 
     def record(tr: Optional[TradeResult]):
@@ -405,7 +422,7 @@ def _execute(broker: Broker, rec: Rec, pf: Portfolio, stats_by_base, session, se
         session.add(Trade(
             action=tr.action, base=tr.base, price=tr.price, quantity=tr.quantity,
             cash_flow=tr.cash_flow, realized_pnl=tr.realized_pnl, mode=tr.mode,
-            order_id=tr.order_id, fee_usd=tr.fee_usd,
+            order_id=tr.order_id, fee_usd=tr.fee_usd, trace_id=trace_id,
         ))
         results.append(tr)
 

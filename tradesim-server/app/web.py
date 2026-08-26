@@ -12,9 +12,9 @@ from fastapi.staticfiles import StaticFiles
 
 from . import config
 from .db import (
-    AuditLog, EquitySnapshot, Portfolio, Recommendation, ScanLog, Settings, Trade,
-    SessionLocal, get_portfolio, get_settings, get_veto_excluded_bases, init_db,
-    reset_for_mode_switch,
+    AuditLog, EquitySnapshot, Portfolio, Recommendation, ScanLog, Settings, StrategyChangeLog,
+    Trade, SessionLocal, get_portfolio, get_settings, get_strategy_params, get_veto_excluded_bases,
+    init_db, reset_for_mode_switch,
 )
 from .engine import run_once
 
@@ -187,10 +187,14 @@ def dashboard(request: Request):
         excl_hours = getattr(st, "veto_exclusion_hours", config.VETO_EXCLUSION_HOURS_DEFAULT)
         audit_on = getattr(st, "audit_enabled", False)
         veto_excluded = get_veto_excluded_bases(s, excl_hours) if audit_on else {}
+        strategy_params = get_strategy_params(s)
+        strategy_changes = (
+            s.query(StrategyChangeLog).order_by(StrategyChangeLog.id.desc()).limit(10).all()
+        )
         err = request.query_params.get("err")
         return HTMLResponse(
             _render(st, pf, rec, recs, trades, last_scan, realized, fees_total, equity, audits,
-                    veto_excluded, err)
+                    veto_excluded, err, strategy_params, strategy_changes)
         )
 
 
@@ -264,7 +268,8 @@ def _candidate_modal(cands: list, held: Optional[str]) -> str:
 
 
 def _render(st: Settings, pf: Portfolio, rec, recs, trades, last_scan, realized, fees_total,
-            equity, audits, veto_excluded: Optional[dict] = None, err: Optional[str] = None) -> str:
+            equity, audits, veto_excluded: Optional[dict] = None, err: Optional[str] = None,
+            strategy_params=None, strategy_changes=None) -> str:
     total = pf.total_value
     ret = total - st.starting_balance
     ret_pct = (ret / st.starting_balance * 100) if st.starting_balance else 0.0
@@ -457,6 +462,36 @@ def _render(st: Settings, pf: Portfolio, rec, recs, trades, last_scan, realized,
     else:
         audit_section = ""
 
+    # Self-improvement: current live thresholds + the auto-tuning audit trail.
+    if strategy_params is not None:
+        params_line = (
+            f"<div class='hdetail'>"
+            f"<span>enter &ge; {strategy_params.enter_threshold_pct:.2f}%</span>"
+            f"<span>rotate &ge; {strategy_params.rotation_threshold_pct:.2f}%</span>"
+            f"<span>exit &le; {strategy_params.exit_threshold_pct:.2f}%</span>"
+            f"<span>trailing stop {strategy_params.trailing_stop_pct:.2f}%</span>"
+            f"</div>"
+        )
+    else:
+        params_line = ""
+    if strategy_changes:
+        change_rows = "".join(
+            f"<li><b>{_esc(c.param)}</b> {c.old_value:+.2f} → {c.new_value:+.2f} — "
+            f"{_esc(c.reason)} <span class='muted'>({_ago(c.ts)})</span></li>"
+            for c in strategy_changes
+        )
+        change_list = f"<ul>{change_rows}</ul>"
+    else:
+        change_list = "<p class='muted'>No automated changes yet.</p>"
+    tuning_section = (
+        "<h2>Strategy tuning</h2>"
+        f"{params_line}"
+        "<p class='muted small'>A daily backtest job nudges the thresholds above when a nearby "
+        "variant clearly beats the live config on recent market history. Bounded step per run, "
+        "never touches the trading kill switch or DRY-RUN/LIVE mode.</p>"
+        f"{change_list}"
+    )
+
     # Chart data.
     eq_labels = [e.ts.strftime("%m/%d %H:%M") for e in equity]
     eq_values = [round(e.total_value, 4) for e in equity]
@@ -502,6 +537,7 @@ def _render(st: Settings, pf: Portfolio, rec, recs, trades, last_scan, realized,
         "scan_line": scan_line,
         "trade_rows": trade_rows,
         "rec_rows": rec_rows,
+        "tuning_section": tuning_section,
         "equity_json": equity_json,
         "alloc_json": alloc_json,
         "baseline_json": baseline_json,
@@ -784,6 +820,8 @@ _PAGE = """<!doctype html>
 
   $audit_section
 
+  $tuning_section
+
   <p class="disclaimer">Personal paper/auto-trading tool. Not financial advice.
   In DRY-RUN no real orders are placed. In LIVE, orders execute on Coinbase with a Trade-scoped key.</p>
 </div>
@@ -877,13 +915,14 @@ def _rec_dict(r):
     if not r:
         return None
     return {"action": r.action, "from_base": r.from_base, "to_base": r.to_base,
-            "rationale": r.rationale, "edge_pct": r.edge_pct, "ts": r.ts.isoformat()}
+            "rationale": r.rationale, "edge_pct": r.edge_pct, "ts": r.ts.isoformat(),
+            "trace_id": getattr(r, "trace_id", None)}
 
 
 def _trade_dict(t):
     return {"ts": t.ts.isoformat(), "action": t.action, "base": t.base, "price": t.price,
             "quantity": t.quantity, "cash_flow": t.cash_flow, "realized_pnl": t.realized_pnl,
-            "mode": t.mode, "order_id": t.order_id}
+            "mode": t.mode, "order_id": t.order_id, "trace_id": getattr(t, "trace_id", None)}
 
 
 def _esc(s) -> str:

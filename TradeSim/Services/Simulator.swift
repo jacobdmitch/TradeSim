@@ -8,7 +8,8 @@ struct Simulator {
     var feeRate: Double = 0.006
 
     /// Deploys all available cash into `target` at `price`.
-    func enter(base: String, productID: String, price: Double, portfolio: inout Portfolio) -> SimulatedTrade? {
+    func enter(base: String, productID: String, price: Double, portfolio: inout Portfolio,
+              traceID: UUID? = nil) -> SimulatedTrade? {
         guard portfolio.position == nil, portfolio.cash > 0.01, price > 0 else { return nil }
         let spend = portfolio.cash
         let invested = spend * (1 - feeRate)
@@ -17,11 +18,11 @@ struct Simulator {
         portfolio.position = Position(base: base, productID: productID,
                                       quantity: qty, costBasisUSD: invested, markPrice: price)
         return SimulatedTrade(action: .buy, base: base, price: price, quantity: qty,
-                              cashFlow: -spend, timestamp: Date(), realizedPnL: nil)
+                              cashFlow: -spend, timestamp: Date(), realizedPnL: nil, traceID: traceID)
     }
 
     /// Liquidates the current position back to USD cash at `price`.
-    func exit(price: Double, portfolio: inout Portfolio) -> SimulatedTrade? {
+    func exit(price: Double, portfolio: inout Portfolio, traceID: UUID? = nil) -> SimulatedTrade? {
         guard let position = portfolio.position, position.quantity > 0, price > 0 else { return nil }
         let gross = position.quantity * price
         let proceeds = gross * (1 - feeRate)
@@ -30,16 +31,17 @@ struct Simulator {
         portfolio.position = nil
         return SimulatedTrade(action: .sell, base: position.base, price: price,
                               quantity: position.quantity, cashFlow: proceeds,
-                              timestamp: Date(), realizedPnL: pnl)
+                              timestamp: Date(), realizedPnL: pnl, traceID: traceID)
     }
 
     /// Rotates from the current coin into `target`: exit to cash, then enter.
     /// Returns both legs (sell, then buy).
     func rotate(toBase: String, toProductID: String, sellPrice: Double, buyPrice: Double,
-                portfolio: inout Portfolio) -> [SimulatedTrade] {
+                portfolio: inout Portfolio, traceID: UUID? = nil) -> [SimulatedTrade] {
         var trades: [SimulatedTrade] = []
-        if let sell = exit(price: sellPrice, portfolio: &portfolio) { trades.append(sell) }
-        if let buy = enter(base: toBase, productID: toProductID, price: buyPrice, portfolio: &portfolio) {
+        if let sell = exit(price: sellPrice, portfolio: &portfolio, traceID: traceID) { trades.append(sell) }
+        if let buy = enter(base: toBase, productID: toProductID, price: buyPrice, portfolio: &portfolio,
+                           traceID: traceID) {
             trades.append(buy)
         }
         return trades
