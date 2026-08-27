@@ -138,9 +138,11 @@ MIN_HOLD_BYPASS_ALTERNATIVES = int(os.environ.get("MIN_HOLD_BYPASS_ALTERNATIVES"
 # or "momentum" (legacy top-gainer chasing). Backtest favored anti_chasing+regime.
 SELECTION_MODE = os.environ.get("SELECTION_MODE", "anti_chasing").strip()
 
-# Regime gate: only deploy out of cash when BTC is trending up AND at least this
-# fraction of the analyzed universe is trending up; otherwise sit in cash.
+# Regime gate: favorable when BTC is trending up AND at least this fraction of
+# the analyzed universe is trending up. Unfavorable doesn't block trading outright
+# — it raises the bar (REGIME_PENALTY_PCT) so only a standout edge still clears.
 REGIME_BREADTH_MIN = float(os.environ.get("REGIME_BREADTH_MIN", "0.5"))
+REGIME_PENALTY_PCT = float(os.environ.get("REGIME_PENALTY_PCT", "3.0"))  # extra edge margin required when unfavorable
 # Anti-chasing guardrails
 ANTI_RSI_MAX = float(os.environ.get("ANTI_RSI_MAX", "68"))
 ANTI_EXTENSION_MAX = float(os.environ.get("ANTI_EXTENSION_MAX", "6.0"))  # % above short SMA

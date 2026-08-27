@@ -113,6 +113,7 @@ class Recommendation(Base):
     rationale: Mapped[str] = mapped_column(Text)
     edge_pct: Mapped[float] = mapped_column(Float)
     trace_id: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, index=True)
+    regime_ok: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
 
 
 class ScanLog(Base):
@@ -209,6 +210,7 @@ def _run_migrations() -> None:
         ],
         "recommendations": [
             ("trace_id", "VARCHAR(32)"),
+            ("regime_ok", "BOOLEAN"),
         ],
         "equity": [
             ("trace_id", "VARCHAR(32)"),

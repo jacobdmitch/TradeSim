@@ -111,17 +111,13 @@ def run_once(force: bool = False) -> CycleResult:
                 scored.append(predictor.score(stat, closes, vols))
         ranked = predictor.rank(scored)
 
-        rec = predictor.recommend(ranked, pf.pos_base, config.FEE_RATE, pf.total_value)
-
-        # Regime gate: in an unfavorable market, don't deploy — sit in cash.
+        # Regime gate: in an unfavorable market this doesn't block deploying cash
+        # outright — it raises the bar predictor.recommend requires to enter or
+        # rotate (REGIME_PENALTY_PCT), so a standout edge still trades.
         regime_ok = _regime_ok(ranked)
-        if config.SELECTION_MODE == "anti_chasing" and not regime_ok:
-            if pf.pos_base:
-                rec = Rec("EXIT", pf.pos_base, None,
-                          "Unfavorable market regime — moving to cash.", 0.0)
-            else:
-                rec = Rec("HOLD", None, None,
-                          "Unfavorable market regime — staying in cash.", 0.0)
+        regime_unfavorable = config.SELECTION_MODE == "anti_chasing" and not regime_ok
+        rec = predictor.recommend(ranked, pf.pos_base, config.FEE_RATE, pf.total_value,
+                                   regime_unfavorable=regime_unfavorable)
         note_parts_regime = "favorable" if regime_ok else "unfavorable"
 
         # Trailing stop: track the high-water mark since entry and force an
@@ -151,11 +147,13 @@ def run_once(force: bool = False) -> CycleResult:
             and last_rec.action == rec.action
             and last_rec.from_base == rec.from_base
             and last_rec.to_base == rec.to_base
+            and last_rec.regime_ok == regime_ok
         )
         if changed:
             session.add(Recommendation(
                 action=rec.action, from_base=rec.from_base, to_base=rec.to_base,
                 rationale=rec.rationale, edge_pct=rec.edge_pct, trace_id=trace_id,
+                regime_ok=regime_ok,
             ))
 
         executed: List[TradeResult] = []
