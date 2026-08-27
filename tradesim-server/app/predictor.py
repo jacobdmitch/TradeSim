@@ -191,13 +191,20 @@ class Predictor:
 
     # ---- Recommendation ----
     def recommend(self, ranked: List[CoinScore], position_base: Optional[str],
-                  fee_rate: float, account_value_usd: float = 0.0) -> Recommendation:
+                  fee_rate: float, account_value_usd: float = 0.0,
+                  regime_unfavorable: bool = False) -> Recommendation:
         """Pick the action. Every gain-seeking action has to clear its own
         trading cost twice over: once in percent (the rotation thresholds plus
         the round trip) and once in dollars (`MIN_NET_PROFIT_USD` of expected
         profit after fees), so a technically-qualifying edge that only amounts
-        to pennies on this account never turns into a trade."""
+        to pennies on this account never turns into a trade.
+
+        `regime_unfavorable` (BTC/broad market trending down) doesn't block
+        deploying cash outright — it raises the bar via REGIME_PENALTY_PCT, so
+        entries and rotations still happen for a standout edge, just not a
+        marginal one. Protective EXITs are unaffected either way."""
         round_trip_cost_pct = fee_rate * 2 * 100
+        regime_penalty_pct = config.REGIME_PENALTY_PCT if regime_unfavorable else 0.0
         min_net_usd = config.MIN_NET_PROFIT_USD
         best = ranked[0] if ranked else None
 
@@ -205,7 +212,7 @@ class Predictor:
         if position_base is None:
             # Entering commits to a round trip — the coin has to be sold again —
             # so the edge must cover both legs, not just the entry fee.
-            if best and best.predicted_edge_pct > self.rotation.enter_threshold_pct + round_trip_cost_pct:
+            if best and best.predicted_edge_pct > self.rotation.enter_threshold_pct + round_trip_cost_pct + regime_penalty_pct:
                 econ = trade_economics(account_value_usd, 2, best.predicted_edge_pct, fee_rate)
                 if econ.net_gain_usd < min_net_usd:
                     return Recommendation(
@@ -228,9 +235,18 @@ class Predictor:
                     strong=best.breakout,
                     economics=econ,
                 )
+            base_bar = self.rotation.enter_threshold_pct + round_trip_cost_pct
+            regime_blocked = bool(
+                regime_unfavorable and best and best.predicted_edge_pct > base_bar
+            )
+            note = (
+                f" {best.base}'s {best.predicted_edge_pct:.1f}% edge would clear the normal "
+                f"{base_bar:.1f}% bar but not the unfavorable-regime bar "
+                f"({base_bar + regime_penalty_pct:.1f}%)." if regime_blocked else ""
+            )
             return Recommendation(
                 "HOLD", None, None,
-                "No coin clears the entry threshold. Staying in cash.",
+                f"No coin clears the entry threshold. Staying in cash.{note}",
                 best.predicted_edge_pct if best else 0.0,
             )
 
@@ -256,7 +272,8 @@ class Predictor:
 
         if (
             best and best.base != position_base
-            and best.predicted_edge_pct > current_edge + self.rotation.rotation_threshold_pct + round_trip_cost_pct
+            and best.predicted_edge_pct > current_edge + self.rotation.rotation_threshold_pct
+                                          + round_trip_cost_pct + regime_penalty_pct
         ):
             # Floor the holding's edge at 0 for the dollar math: a disqualified
             # holding scores -999, which would otherwise project an absurd gain.
