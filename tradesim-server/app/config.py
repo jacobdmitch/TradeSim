@@ -38,12 +38,12 @@ SEED_PRODUCT_ID = "DIMO-USD"
 # ---- Market / execution constants (match the iOS app) ----
 QUOTE_CURRENCY = "USD"
 GRANULARITY = 3600          # 1-hour candles
-FEE_RATE = 0.006            # Coinbase Advanced taker fee, low-volume tier (~0.6%/leg)
+FEE_RATE = 0.012            # Coinbase Advanced taker fee, low-volume tier (~1.2%/leg)
 MIN_LIQUIDITY_USD = 100_000  # minimum 24h USD volume on Coinbase to be a rotation candidate
 
 # Fee floor in real money. Percent thresholds alone hide fee drag on a small
-# account: at 0.6%/leg a $27 position pays ~$0.32 per round trip, so a 0.2%
-# "edge" is 5c of upside against 32c of cost. ENTER and ROTATE must therefore
+# account: at 1.2%/leg a $27 position pays ~$0.65 per round trip, so a 0.2%
+# "edge" is 5c of upside against 65c of cost. ENTER and ROTATE must therefore
 # clear their own round-trip cost by at least this many dollars of expected
 # profit — otherwise the engine holds. Raise it to trade less and only on
 # meaningful moves; the % thresholds below stay in force either way.
