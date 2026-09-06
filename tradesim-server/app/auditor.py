@@ -11,6 +11,10 @@ Design rules:
   - It audits data integrity, obvious traps, adverse news, and whether the trade
     earns back its own fees. It is NOT a price predictor; the quantitative edge
     stays with the deterministic engine.
+  - Never called for EXIT: engine.py executes every protective exit immediately
+    without an audit gate. A stop-loss is priced as a cost by design, so "no
+    expected gain" is true of every one and blocking/delaying it on that basis
+    (or on a perceived execution risk) only lets the position keep losing money.
 """
 from __future__ import annotations
 
@@ -57,8 +61,8 @@ _SYSTEM = (
     "eating most of expected_gross_gain_usd, or a required move larger than the "
     "coin's recent range makes plausible (compare round_trip_cost_pct against "
     "momentum_pct, roc_short_pct and change_24h_pct). Do NOT veto a trade whose "
-    "net is solidly positive merely because fees exist, and do NOT apply this to "
-    "an EXIT — a protective move to cash is priced as a cost by design.\n"
+    "net is solidly positive merely because fees exist. You will never be asked "
+    "to audit an EXIT — protective exits always execute without review.\n"
     "Approve by default. Only veto (downgrade to HOLD) when you find a concrete, "
     "specific problem — never on vague caution. "
     'Reply with ONLY a JSON object: {"verdict":"approve"|"hold","reason":"<one short sentence>"}.'

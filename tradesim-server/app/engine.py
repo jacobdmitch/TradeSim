@@ -206,6 +206,13 @@ def run_once(force: bool = False) -> CycleResult:
                     note_parts.append(f"min_hold:{hold_remaining:.1f}h_left")
             elif needs_confirm and not persisted:
                 note_parts.append("awaiting_confirmation:1of2")
+            elif rec.action == "EXIT":
+                # Protective exits always execute immediately, never audit-gated:
+                # a stop-loss is a cost by design, so "no expected gain" is true
+                # of every one and is never a real reason to block it — doing so
+                # only lets the position keep losing money while it waits.
+                executed = _execute(broker, rec, pf, stats_by_base, session, settings, trace_id)
+                note_parts.append(f"executed={[t.action for t in executed]}")
             else:
                 # Optional Claude pre-trade audit (veto-only, fail-open).
                 audit_res = _run_audit(rec, ranked, pf, stats_by_base, settings, session, trace_id)
