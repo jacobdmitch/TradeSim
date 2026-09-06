@@ -106,9 +106,9 @@ def run_once(force: bool = False) -> CycleResult:
         series_map = market.fetch_series_for([c.product_id for c in candidates])
         scored: List[CoinScore] = []
         for stat in candidates:
-            closes, vols = series_map.get(stat.product_id, (None, None))
+            closes, vols, highs, lows = series_map.get(stat.product_id, (None, None, None, None))
             if closes and len(closes) > strategy.long_sma + 1:
-                scored.append(predictor.score(stat, closes, vols))
+                scored.append(predictor.score(stat, closes, vols, highs, lows))
         ranked = predictor.rank(scored)
 
         # Regime gate: in an unfavorable market this doesn't block deploying cash
@@ -121,17 +121,22 @@ def run_once(force: bool = False) -> CycleResult:
         note_parts_regime = "favorable" if regime_ok else "unfavorable"
 
         # Trailing stop: track the high-water mark since entry and force an
-        # immediate EXIT when price falls TRAILING_STOP_PCT below it. This locks
-        # in a run's gains instead of holding until the (lagging) SMA flip.
+        # immediate EXIT when price falls below it. This locks in a run's gains
+        # instead of holding until the (lagging) SMA flip. The distance is the
+        # tuned baseline (trailing_stop_pct) scaled by this holding's own recent
+        # volatility, so a choppy coin isn't stopped out by its normal noise and
+        # a calm one doesn't carry an unnecessarily loose stop.
         if pf.has_position and pf.pos_mark_price > 0:
             peak = max(getattr(pf, "pos_peak_price", 0.0) or 0.0, pf.pos_mark_price)
             pf.pos_peak_price = peak
-            stop_price = peak * (1 - trailing_stop_pct / 100)
+            held_score = next((s for s in ranked if s.base == pf.pos_base), None)
+            stop_pct = _scaled_trailing_stop_pct(trailing_stop_pct, held_score.atr_pct if held_score else 0.0)
+            stop_price = peak * (1 - stop_pct / 100)
             if pf.pos_mark_price <= stop_price and rec.action != "EXIT":
                 off_peak = (pf.pos_mark_price / peak - 1) * 100
                 rec = Rec("EXIT", pf.pos_base, None,
                           f"Trailing stop: {pf.pos_base} is {off_peak:.1f}% below its "
-                          f"peak since entry (stop at -{trailing_stop_pct:.1f}%). "
+                          f"peak since entry (stop at -{stop_pct:.1f}%, volatility-scaled). "
                           "Locking in the run.", 0.0)
                 note_parts_regime += " trailing_stop_hit"
 
@@ -221,7 +226,7 @@ def run_once(force: bool = False) -> CycleResult:
              "momentum": round(c.momentum, 4),
              "rsi": round(c.rsi, 1) if c.rsi is not None else None,
              "change_24h": round(c.change_24h, 4), "trend_up": c.trend_up,
-             "breakout": c.breakout}
+             "breakout": c.breakout, "atr_pct": round(c.atr_pct, 2)}
             for c in ranked
         ]
         session.add(ScanLog(candidates=len(scored), note=note,
@@ -351,6 +356,19 @@ def _run_audit(rec: Rec, ranked: List[CoinScore], pf: Portfolio, stats_by_base,
             reason=res.reason[:500], model=res.model, trace_id=trace_id,
         ))
     return res
+
+
+def _scaled_trailing_stop_pct(base_pct: float, atr_pct: float) -> float:
+    """Scale the tuned baseline stop by how volatile this coin's hourly bars
+    are relative to a "typical" coin (config.TRAILING_STOP_REFERENCE_ATR_PCT),
+    so a choppy name gets more room before a normal pullback trips the stop
+    and a calm one keeps a tighter one. Always bounded by FLOOR/CEILING so the
+    stop is never effectively removed nor made unreasonably tight."""
+    if atr_pct <= 0:
+        scaled = base_pct
+    else:
+        scaled = base_pct * (atr_pct / config.TRAILING_STOP_REFERENCE_ATR_PCT)
+    return min(max(scaled, config.TRAILING_STOP_FLOOR_PCT), config.TRAILING_STOP_CEILING_PCT)
 
 
 def _regime_ok(ranked: List[CoinScore]) -> bool:

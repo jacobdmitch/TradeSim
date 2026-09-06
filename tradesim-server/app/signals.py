@@ -38,3 +38,18 @@ def rsi(values: Sequence[float], period: int) -> Optional[float]:
         return 100.0
     rs = avg_gain / avg_loss
     return 100.0 - (100.0 / (1.0 + rs))
+
+
+def atr(highs: Sequence[float], lows: Sequence[float], closes: Sequence[float],
+        period: int) -> Optional[float]:
+    """Average True Range (simple average of true range) over `period` bars.
+    True range accounts for gaps between bars, not just the bar's own high-low."""
+    if period <= 0 or len(closes) <= period or len(highs) != len(closes) or len(lows) != len(closes):
+        return None
+    true_ranges = [
+        max(highs[i] - lows[i], abs(highs[i] - closes[i - 1]), abs(lows[i] - closes[i - 1]))
+        for i in range(1, len(closes))
+    ]
+    if len(true_ranges) < period:
+        return None
+    return sum(true_ranges[-period:]) / period

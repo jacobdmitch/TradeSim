@@ -160,7 +160,22 @@ BREAKOUT_RSI_HARD_MAX = float(os.environ.get("BREAKOUT_RSI_HARD_MAX", "85"))    
 
 # Trailing stop: exit when price falls this % below its peak since entry.
 # Locks in most of a run instead of holding until the (lagging) SMA flip.
+# This is the BASELINE for a "typical" coin (still the value improve.py auto-
+# tunes nightly); the engine scales it per-holding by that coin's own recent
+# volatility (see TRAILING_STOP_* below) so a choppy name isn't stopped out by
+# its normal noise and a calm one doesn't get an unnecessarily loose stop.
 TRAILING_STOP_PCT = float(os.environ.get("TRAILING_STOP_PCT", "5.0"))
+
+# Hourly-bar lookback for the volatility (ATR) measure used to scale the stop.
+ATR_PERIOD = int(os.environ.get("ATR_PERIOD", "14"))
+# ATR% considered "typical" for a coin in this universe. A holding whose ATR%
+# is 2x this reference gets roughly 2x the baseline trailing-stop distance.
+TRAILING_STOP_REFERENCE_ATR_PCT = _f("TRAILING_STOP_REFERENCE_ATR_PCT", 3.0)
+# Hard bounds on the scaled stop, regardless of how extreme the ratio gets —
+# it can widen or tighten the baseline, but never removes the stop (floor)
+# and never lets one coin's volatility justify an unreasonably loose one (ceiling).
+TRAILING_STOP_FLOOR_PCT = _f("TRAILING_STOP_FLOOR_PCT", 3.0)
+TRAILING_STOP_CEILING_PCT = _f("TRAILING_STOP_CEILING_PCT", 15.0)
 
 COINBASE_API_KEY = os.environ.get("COINBASE_API_KEY", "").strip()
 # Allow the PEM to be supplied with escaped newlines.
