@@ -27,6 +27,7 @@ class CoinScore:
     breakout: bool = False   # fresh run: short-term ROC + volume surge qualified
     roc: float = 0.0         # % change over BREAKOUT_ROC_BARS bars
     vol_surge: float = 0.0   # recent bar volume vs trailing 24h average
+    atr_pct: float = 0.0     # hourly Average True Range, as % of price (0 if unavailable)
 
 
 @dataclass
@@ -78,7 +79,9 @@ class Predictor:
 
     # ---- Scoring ----
     def score(self, stat: MarketStat, closes: List[float],
-              vols: Optional[List[float]] = None) -> CoinScore:
+              vols: Optional[List[float]] = None,
+              highs: Optional[List[float]] = None,
+              lows: Optional[List[float]] = None) -> CoinScore:
         look = min(self.rotation.momentum_lookback, max(len(closes) - 1, 1))
         if len(closes) > look and closes:
             past = closes[len(closes) - 1 - look]
@@ -93,6 +96,9 @@ class Predictor:
         rsi = signals.rsi(closes, self.strategy.rsi_period)
         extension = (stat.last / short_sma - 1) * 100 if short_sma > 0 else 0.0
         breakout, roc, vol_surge = self._breakout(closes, vols, rsi)
+
+        atr_val = signals.atr(highs, lows, closes, config.ATR_PERIOD) if highs and lows else None
+        atr_pct = (atr_val / stat.last * 100) if atr_val and stat.last > 0 else 0.0
 
         if self.mode == "anti_chasing":
             edge = self._edge_anti_chasing(momentum, trend_up, rsi, extension,
@@ -112,6 +118,7 @@ class Predictor:
             breakout=breakout,
             roc=roc,
             vol_surge=vol_surge,
+            atr_pct=atr_pct,
         )
 
     @staticmethod

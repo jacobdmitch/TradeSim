@@ -123,15 +123,17 @@ def fetch_candles(product_id: str, granularity: int = config.GRANULARITY) -> Lis
 
 def fetch_series_for(product_ids: List[str],
                      granularity: int = config.GRANULARITY) -> Dict[str, tuple]:
-    """(closes, usd_volumes) series keyed by product id (sequential; the
-    candidate set is small). Volume is approximated as close * base volume."""
+    """(closes, usd_volumes, highs, lows) series keyed by product id (sequential;
+    the candidate set is small). Volume is approximated as close * base volume."""
     out: Dict[str, tuple] = {}
     for pid in product_ids:
         try:
             rows = fetch_candles(pid, granularity)
             closes = [row[4] for row in rows]              # close is index 4
             vols = [row[4] * row[5] for row in rows]       # USD volume proxy
-            out[pid] = (closes, vols)
+            highs = [row[2] for row in rows]                # high is index 2
+            lows = [row[1] for row in rows]                 # low is index 1
+            out[pid] = (closes, vols, highs, lows)
         except Exception:
             continue
     return out
