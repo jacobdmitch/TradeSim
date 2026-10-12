@@ -366,7 +366,7 @@ def run_strategy(name: str, target_fn: Callable, timeline, closes, vols,
                         invested = cash * (1 - FEE)
                         fees += cash * FEE
                         qty = invested / price_now
-                        basis = invested
+                        basis = cash  # cash paid, fee included (matches broker.py)
                         base = target
                         cash = 0.0
                         trades += 1

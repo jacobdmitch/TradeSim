@@ -1,9 +1,8 @@
 """Order execution.
 
 Two modes, selected per-run from the DB settings:
-  - DRY  : paper fills, same fill math as the iOS app's Simulator (fee per leg,
-           single mark price), except the cost basis includes the entry fee, as in
-           LIVE. Never calls Coinbase order endpoints.
+  - DRY  : paper fills, identical math to the iOS app's Simulator (fee per leg,
+           single mark price). Never calls Coinbase order endpoints.
   - LIVE : real market orders via the Coinbase Advanced Trade API
            (coinbase-advanced-py). The API key MUST be scoped to Trade only.
 
@@ -20,7 +19,7 @@ from decimal import ROUND_DOWN, Decimal
 from typing import Optional
 
 from . import config
-from .db import Portfolio, Trade
+from .db import Portfolio
 
 
 @dataclass
