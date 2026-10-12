@@ -2,6 +2,7 @@
 falling back to a local SQLite file for development."""
 from __future__ import annotations
 
+import logging
 import os
 from typing import Optional
 from datetime import datetime, timezone
@@ -12,6 +13,8 @@ from sqlalchemy import (
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 from . import config
+
+log = logging.getLogger("tradesim.db")
 
 
 def _database_url() -> str:
@@ -242,10 +245,47 @@ def _run_migrations() -> None:
                     conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}"))
 
 
+def _fix_live_realized_pnl() -> None:
+    """Correct realized_pnl on LIVE sells recorded before the entry cost basis
+    counted the buy fee. Those rows used basis = filled_value - fee, but the cash
+    paid was filled_value + fee, so each round trip overstated P&L by 2x the buy fee.
+
+    Idempotent without a marker: a sell's basis is recoverable as
+    cash_flow - realized_pnl, and a row is only changed while that still equals the
+    old formula for the buy that opened the lot. Corrected rows and rows written
+    after the fix no longer match, so re-running (every startup) changes nothing.
+    A sell with no matching buy (e.g. the adopted seed position) is left alone."""
+    with SessionLocal() as s:
+        last_buy = {}
+        fixed, before, after = 0, 0.0, 0.0
+        for t in s.query(Trade).filter(Trade.mode == "LIVE").order_by(Trade.id):
+            if t.action == "BUY":
+                last_buy[t.base] = t
+            elif t.action == "SELL" and t.realized_pnl is not None:
+                b = last_buy.pop(t.base, None)
+                fee = (b.fee_usd or 0.0) if b else 0.0
+                if fee <= 0:
+                    continue
+                old_basis = abs(b.cash_flow) - fee
+                if abs((t.cash_flow - t.realized_pnl) - old_basis) < 1e-6:
+                    before += t.realized_pnl
+                    t.realized_pnl -= 2 * fee
+                    after += t.realized_pnl
+                    fixed += 1
+        if fixed:
+            s.commit()
+            log.info("realized P&L migration: corrected %d LIVE sell(s), their P&L sum %.4f -> %.4f",
+                     fixed, before, after)
+
+
 def init_db() -> None:
     """Create tables and seed the singleton control rows if missing."""
     Base.metadata.create_all(ENGINE)
     _run_migrations()
+    try:
+        _fix_live_realized_pnl()
+    except Exception:  # never block trading startup on a bookkeeping fix
+        log.exception("realized P&L migration failed; will retry next start")
     with SessionLocal() as s:
         if s.get(Settings, 1) is None:
             s.add(Settings(
