@@ -1,6 +1,7 @@
 """FastAPI dashboard: portfolio, P&L, trades, recommendations, and controls
 (kill switch, dry-run/live toggle, run-now). Server-rendered, no build step."""
 import json
+import math
 from datetime import datetime, timezone
 from pathlib import Path
 from string import Template
@@ -13,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from . import config
 from .db import (
     AuditLog, EquitySnapshot, Portfolio, Recommendation, ScanLog, Settings, StrategyChangeLog,
-    Trade, SessionLocal, get_portfolio, get_settings, get_strategy_params, get_veto_excluded_bases,
+    Trade, Transfer, SessionLocal, get_portfolio, get_settings, get_strategy_params, get_veto_excluded_bases,
     init_db, reset_for_mode_switch,
 )
 from .engine import run_once
@@ -64,6 +65,15 @@ def _since(query, col, since):
     return query.filter(col >= since) if since else query
 
 
+def _transfer_totals(session, since):
+    """(deposits, withdrawals) in USD recorded during the current run."""
+    rows = _since(session.query(Transfer), Transfer.ts, since).all()
+    return (
+        sum(t.amount_usd for t in rows if t.kind == "DEPOSIT"),
+        sum(t.amount_usd for t in rows if t.kind == "WITHDRAWAL"),
+    )
+
+
 @app.get("/healthz")
 def healthz():
     return {"ok": True, "ts": datetime.now(timezone.utc).isoformat()}
@@ -78,19 +88,23 @@ def api_state():
         rec = _since(s.query(Recommendation), Recommendation.ts, since).order_by(Recommendation.id.desc()).first()
         trades = _since(s.query(Trade), Trade.ts, since).order_by(Trade.id.desc()).limit(50).all()
         realized = sum(t.realized_pnl or 0.0 for t in _since(s.query(Trade), Trade.ts, since).all())
+        deposits, withdrawn = _transfer_totals(s, since)
+        deposited = st.starting_balance + deposits
+        total_return = pf.total_value + withdrawn - deposited
         return JSONResponse({
             "enabled": st.enabled,
             "dry_run": st.dry_run,
             "seeded": st.seeded,
             "starting_balance": st.starting_balance,
+            "deposited": deposited,
+            "withdrawn": withdrawn,
             "balance_floor_usd": st.balance_floor_usd,
             "cash": pf.cash,
             "holding": pf.pos_base,
             "position_value": pf.position_value,
             "total_value": pf.total_value,
-            "total_return": pf.total_value - st.starting_balance,
-            "total_return_pct": ((pf.total_value - st.starting_balance) / st.starting_balance * 100)
-            if st.starting_balance else 0.0,
+            "total_return": total_return,
+            "total_return_pct": (total_return / deposited * 100) if deposited else 0.0,
             "realized_pnl": realized,
             "latest_recommendation": _rec_dict(rec),
             "trades": [_trade_dict(t) for t in trades],
@@ -153,6 +167,21 @@ def toggle_audit(token: Optional[str] = Form(default=None)):
     return RedirectResponse("/", status_code=303)
 
 
+@app.post("/transfer")
+def record_transfer(kind: str = Form(...), amount: float = Form(...),
+                    token: Optional[str] = Form(default=None)):
+    """Record money moved into or out of the account so it isn't counted as
+    trading profit or loss. Amount is the USD value at the time of the transfer."""
+    if not _authorized(token):
+        return RedirectResponse("/?err=auth", status_code=303)
+    if kind not in ("DEPOSIT", "WITHDRAWAL") or not math.isfinite(amount) or amount <= 0:
+        return RedirectResponse("/?err=amount", status_code=303)
+    with SessionLocal() as s:
+        s.add(Transfer(kind=kind, amount_usd=amount))
+        s.commit()
+    return RedirectResponse("/", status_code=303)
+
+
 @app.post("/set/interval")
 def set_interval(value: int = Form(...), token: Optional[str] = Form(default=None)):
     if not _authorized(token):
@@ -191,10 +220,12 @@ def dashboard(request: Request):
         strategy_changes = (
             s.query(StrategyChangeLog).order_by(StrategyChangeLog.id.desc()).limit(10).all()
         )
+        deposits, withdrawn = _transfer_totals(s, since)
         err = request.query_params.get("err")
         return HTMLResponse(
             _render(st, pf, rec, recs, trades, last_scan, realized, fees_total, equity, audits,
-                    veto_excluded, err, strategy_params, strategy_changes)
+                    veto_excluded, err, strategy_params, strategy_changes,
+                    deposits=deposits, withdrawn=withdrawn)
         )
 
 
@@ -269,10 +300,14 @@ def _candidate_modal(cands: list, held: Optional[str]) -> str:
 
 def _render(st: Settings, pf: Portfolio, rec, recs, trades, last_scan, realized, fees_total,
             equity, audits, veto_excluded: Optional[dict] = None, err: Optional[str] = None,
-            strategy_params=None, strategy_changes=None) -> str:
+            strategy_params=None, strategy_changes=None,
+            deposits: float = 0.0, withdrawn: float = 0.0) -> str:
     total = pf.total_value
-    ret = total - st.starting_balance
-    ret_pct = (ret / st.starting_balance * 100) if st.starting_balance else 0.0
+    # Return is what the account earned: value now plus what was taken out, minus
+    # everything put in, so deposits and withdrawals never read as profit or loss.
+    deposited = st.starting_balance + deposits
+    ret = total + withdrawn - deposited
+    ret_pct = (ret / deposited * 100) if deposited else 0.0
     holding = pf.pos_base or "USD (cash)"
     up = ret >= 0
 
@@ -324,6 +359,7 @@ def _render(st: Settings, pf: Portfolio, rec, recs, trades, last_scan, realized,
     err_messages = {
         "confirm": "Type LIVE in the box to switch to live trading.",
         "auth": "Wrong control token.",
+        "amount": "Enter a positive USD amount.",
     }
     err_banner = (
         f'<div class="banner">{_esc(err_messages[err])}</div>'
@@ -510,8 +546,8 @@ def _render(st: Settings, pf: Portfolio, rec, recs, trades, last_scan, realized,
     ctx = {
         "fees_total": f"{fees_total:,.2f}",
         "knob": knob,
-        "seed": config.SEED_BASE,
-        "start": f"{st.starting_balance:,.2f}",
+        "deposited": f"{deposited:,.2f}",
+        "withdrawn": f"{withdrawn:,.2f}",
         "floor_note": floor_note,
         "mode_badge": mode_badge,
         "enabled_badge": enabled_badge,
@@ -671,6 +707,9 @@ _PAGE = """<!doctype html>
   button.go { background:linear-gradient(180deg,var(--grass),var(--jade)); }
   button.warn { background:linear-gradient(180deg,#f4978e,#e5675b); color:#2a0d0a; box-shadow:0 6px 16px rgba(229,103,91,.3); }
   .tok { background:var(--bg); border:1px solid var(--line); color:var(--text); border-radius:9px; padding:9px; }
+  .xfer { margin:0 0 20px; }
+  .xfer summary { cursor:pointer; color:var(--muted); font-size:13px; }
+  .xfer form { flex-wrap:wrap; margin-top:10px; }
 
   .rec { padding:16px; border-radius:14px; background:var(--panel2); border-left:4px solid var(--teal);
     box-shadow:0 8px 20px rgba(0,0,0,.2); }
@@ -765,7 +804,7 @@ _PAGE = """<!doctype html>
 <body><div class="wrap">
   <div class="head"><h1>TradeSim</h1> $mode_badge $enabled_badge $audit_badge
     <a class="refresh" href="/" aria-label="Refresh" title="Refresh">⟳</a></div>
-  <div class="sub">Seed $seed · started at $$${start} · ${floor_note}auto-rotation strategy</div>
+  <div class="sub">deposited $$${deposited} · withdrawn $$${withdrawn} · ${floor_note}auto-rotation strategy</div>
 
   <div class="grid">
     <div class="card"><div class="label">Total Value</div>
@@ -796,6 +835,17 @@ _PAGE = """<!doctype html>
     <form class="inline" method="post" action="/run-now">$token_field
       <button class="ghost">Run cycle now</button></form>
   </div>
+
+  <details class="xfer"><summary>Record a deposit or withdrawal</summary>
+    <form class="inline" method="post" action="/transfer">$token_field
+      <select class="tok" name="kind" aria-label="Type">
+        <option value="DEPOSIT">Deposit</option><option value="WITHDRAWAL">Withdrawal</option></select>
+      <input class="tok" type="number" name="amount" min="0.01" step="0.01"
+        inputmode="decimal" placeholder="USD amount" aria-label="USD amount" required>
+      <button class="ghost">Record</button></form>
+    <p class="muted small">Enter the USD value at the time of the transfer. Recorded amounts
+    are excluded from Total Return; withdrawals are added back to it.</p>
+  </details>
 
   <div class="panel"><p class="chart-title">Cadence — how often it trades</p>$knob</div>
 

@@ -103,6 +103,18 @@ class Trade(Base):
     trace_id: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, index=True)
 
 
+class Transfer(Base):
+    """Money moved into (DEPOSIT) or out of (WITHDRAWAL) the account after the
+    starting balance, recorded by hand from the dashboard. The Coinbase key is
+    Trade-only, so transfers can't be read from the exchange. Without this, a
+    deposit would show up as trading profit and a withdrawal as a loss."""
+    __tablename__ = "transfers"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    kind: Mapped[str] = mapped_column(String(10))       # DEPOSIT | WITHDRAWAL
+    amount_usd: Mapped[float] = mapped_column(Float)    # always positive
+
+
 class Recommendation(Base):
     __tablename__ = "recommendations"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
