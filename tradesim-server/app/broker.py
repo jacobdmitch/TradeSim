@@ -187,7 +187,9 @@ class Broker:
         order_id = self._place_market(product_id, side="BUY", quote_size=quote_size)
         fill = self._fill(order_id)
         qty = fill["filled_size"]
-        invested = fill["filled_value"] - fill["fees"]  # net cost basis (ex-fee)
+        # Coinbase's filled_value excludes the fee, so the cash paid is value + fees.
+        # Basis is the cash paid, so realized P&L reconciles with the account.
+        invested = fill["filled_value"] + fill["fees"]
         avg_price = fill["avg_price"] or price
         pf.cash = max(pf.cash - fill["filled_value"], 0.0)
         pf.pos_base = base
