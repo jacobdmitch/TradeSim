@@ -68,6 +68,20 @@ tradesim-server/
    - **→ DRY-RUN (incl. trading OFF):** snapshots the current account value as
      the new baseline and paper-trades forward from the holdings on hand.
 
+## Deposits and withdrawals
+
+The header line shows **deposited** (the starting balance plus any deposits you
+record) and **withdrawn** (money you moved out of the account). **Total Return**
+is `total value + withdrawn - deposited`, so money you add or take out is never
+counted as trading profit or loss; return % is measured against `deposited`.
+
+The Coinbase key is Trade-only, so the server can't see transfers on its own.
+Whenever you move money in or out, open **Record a deposit or withdrawal** on the
+dashboard, pick the type, and enter the USD value at the time of the transfer
+(for a coin transfer, its dollar value that day). Recorded transfers are stored in
+the `transfers` table and, like trades, are scoped to the current run: switching
+DRY-RUN ↔ LIVE starts them over along with the rest of the dashboard.
+
 ## Coinbase API key
 
 1. Go to the Coinbase Developer Platform → API Keys → create a key.
