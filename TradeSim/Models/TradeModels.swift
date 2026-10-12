@@ -29,7 +29,7 @@ struct Position: Codable, Hashable {
     var base: String          // "DIMO"
     var productID: String     // "DIMO-USD"
     var quantity: Double      // coins held
-    var costBasisUSD: Double  // USD deployed into this position (ex-fee)
+    var costBasisUSD: Double  // USD paid for this position (fee included)
     var markPrice: Double     // latest known price per coin
 
     var value: Double { quantity * markPrice }

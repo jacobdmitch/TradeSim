@@ -16,7 +16,7 @@ struct Simulator {
         let qty = invested / price
         portfolio.cash = 0
         portfolio.position = Position(base: base, productID: productID,
-                                      quantity: qty, costBasisUSD: invested, markPrice: price)
+                                      quantity: qty, costBasisUSD: spend, markPrice: price)
         return SimulatedTrade(action: .buy, base: base, price: price, quantity: qty,
                               cashFlow: -spend, timestamp: Date(), realizedPnL: nil, traceID: traceID)
     }
