@@ -254,7 +254,9 @@ def _fix_live_realized_pnl() -> None:
     cash_flow - realized_pnl, and a row is only changed while that still equals the
     old formula for the buy that opened the lot. Corrected rows and rows written
     after the fix no longer match, so re-running (every startup) changes nothing.
-    A sell with no matching buy (e.g. the adopted seed position) is left alone."""
+    The old formula assumes the buy's cash_flow was -filled_value, as it was then; buys
+    written since record -(filled_value + fee) with basis filled_value + fee, so they
+    never match. A sell with no matching buy (e.g. the adopted seed position) is left alone."""
     with SessionLocal() as s:
         last_buy = {}
         fixed, before, after = 0, 0.0, 0.0

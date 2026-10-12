@@ -1,8 +1,9 @@
 """Order execution.
 
 Two modes, selected per-run from the DB settings:
-  - DRY  : paper fills, identical math to the iOS app's Simulator (fee per leg,
-           single mark price). Never calls Coinbase order endpoints.
+  - DRY  : paper fills, same fill math as the iOS app's Simulator (fee per leg,
+           single mark price), except the cost basis includes the entry fee, as in
+           LIVE. Never calls Coinbase order endpoints.
   - LIVE : real market orders via the Coinbase Advanced Trade API
            (coinbase-advanced-py). The API key MUST be scoped to Trade only.
 
@@ -174,7 +175,7 @@ class Broker:
             pf.pos_base = base
             pf.pos_product_id = product_id
             pf.pos_quantity = qty
-            pf.pos_cost_basis_usd = invested
+            pf.pos_cost_basis_usd = spend  # cash paid, fee included, same as LIVE
             pf.pos_mark_price = price
             pf.pos_peak_price = price
             pf.pos_opened_at = datetime.now(timezone.utc)
@@ -188,19 +189,20 @@ class Broker:
         fill = self._fill(order_id)
         qty = fill["filled_size"]
         # Coinbase's filled_value excludes the fee, so the cash paid is value + fees.
-        # Basis is the cash paid, so realized P&L reconciles with the account.
-        invested = fill["filled_value"] + fill["fees"]
+        # Basis, cash left and the trade's cash flow all use the cash paid, so realized
+        # P&L, the Cash flow column and the cycle's equity snapshot reconcile with the account.
+        cost = fill["filled_value"] + fill["fees"]
         avg_price = fill["avg_price"] or price
-        pf.cash = max(pf.cash - fill["filled_value"], 0.0)
+        pf.cash = max(pf.cash - cost, 0.0)
         pf.pos_base = base
         pf.pos_product_id = product_id
         pf.pos_quantity = qty
-        pf.pos_cost_basis_usd = invested
+        pf.pos_cost_basis_usd = cost
         pf.pos_mark_price = avg_price
         pf.pos_peak_price = avg_price
         pf.pos_opened_at = datetime.now(timezone.utc)
         pf.last_change_at = pf.pos_opened_at
-        return TradeResult("BUY", base, avg_price, qty, -fill["filled_value"], None, "LIVE", order_id,
+        return TradeResult("BUY", base, avg_price, qty, -cost, None, "LIVE", order_id,
                            fee_usd=fill["fees"])
 
     # ---- Exit: liquidate the position back to USD ----
