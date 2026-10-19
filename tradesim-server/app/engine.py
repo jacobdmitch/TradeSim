@@ -79,6 +79,7 @@ def run_once(force: bool = False) -> CycleResult:
 
         stats_by_base = {s.base: s for s in stats}
         broker = Broker(dry_run=settings.dry_run)
+        recon_notes: List[str] = []
 
         if settings.dry_run:
             # Paper mode: mark to last price, seed the modeled starting stake once.
@@ -92,7 +93,7 @@ def run_once(force: bool = False) -> CycleResult:
         else:
             # LIVE mode: trust the real Coinbase account, not modeled values.
             # If balances can't be read, abort the cycle rather than trade blind.
-            _reconcile_live(broker, pf, settings, stats_by_base)
+            recon_notes = _reconcile_live(broker, pf, settings, stats_by_base)
 
         # Compute veto-excluded tokens (requires 2 consecutive auditor vetos).
         excl_hours = getattr(settings, "veto_exclusion_hours", config.VETO_EXCLUSION_HOURS_DEFAULT)
@@ -164,6 +165,7 @@ def run_once(force: bool = False) -> CycleResult:
         executed: List[TradeResult] = []
         note_parts = [f"mode={'DRY' if settings.dry_run else 'LIVE'}",
                       f"enabled={settings.enabled}", f"regime={note_parts_regime}"]
+        note_parts.extend(recon_notes)
         if rec.fee_blocked and rec.economics is not None:
             # The move qualified on percent but not in real money — record why.
             note_parts.append(
@@ -259,34 +261,45 @@ def run_once(force: bool = False) -> CycleResult:
         session.close()
 
 
-def _reconcile_live(broker: Broker, pf: Portfolio, settings: Settings, stats_by_base) -> None:
+def _reconcile_live(broker: Broker, pf: Portfolio, settings: Settings, stats_by_base) -> List[str]:
     """LIVE only: overwrite the portfolio bookkeeping with the actual Coinbase
     balances so trade sizing, account value, and P&L reflect real funds — never
     the modeled $seed. Raises on balance-read failure so the cycle aborts instead
-    of trading on stale numbers."""
+    of trading on stale numbers.
+
+    Which holding the bot manages is the operator's pick (`settings.adopt_base`, a
+    coin's base currency or "USD" for cash only):
+      - fresh LIVE run (`not seeded`): the pick defines the starting point and the
+        return baseline, and any modeled/paper holding is dropped first. With no
+        pick it falls back to config.SEED_BASE.
+      - already seeded, with a pick: an in-place reconcile that moves tracking to
+        the pick and leaves the baseline and history alone.
+    The bot manages one position, so coins it isn't tracking are left untouched and
+    reported. Returns scan-note tokens for anything the operator should know."""
     try:
         bals = broker.balances()
     except Exception as e:  # noqa: BLE001
         raise RuntimeError(f"live balance read failed; skipping cycle: {e}")
 
+    notes: List[str] = []
     pf.cash = bals.get("USD", 0.0)
+    pick = settings.adopt_base
 
-    # First live cycle: adopt whatever the account actually holds (your DIMO),
-    # and anchor the return baseline to that real starting value.
     if not settings.seeded:
-        seed_qty = bals.get(config.SEED_BASE, 0.0)
-        st = stats_by_base.get(config.SEED_BASE)
-        if seed_qty > 0 and st and st.last > 0:
-            pf.pos_base = config.SEED_BASE
-            pf.pos_product_id = st.product_id
-            pf.pos_quantity = seed_qty
-            pf.pos_mark_price = st.last
-            pf.pos_peak_price = st.last
-            pf.pos_cost_basis_usd = seed_qty * st.last  # basis = value at takeover (PnL starts at 0)
-            pf.pos_opened_at = datetime.now(timezone.utc)
-            pf.last_change_at = pf.pos_opened_at
+        _clear_tracked(pf)
+        note = _adopt_holding(pf, pick or config.SEED_BASE, bals, stats_by_base)
+        if note and pick:  # the legacy default coin being absent is the normal case
+            notes.append(note)
         settings.seeded = True
+        settings.adopt_base = None
         settings.starting_balance = pf.total_value  # real baseline for return %
+    elif pick:
+        if pick != pf.pos_base:
+            _clear_tracked(pf)
+            note = _adopt_holding(pf, pick, bals, stats_by_base)
+            if note:
+                notes.append(note)
+        settings.adopt_base = None
 
     # Reconcile the tracked position to the real on-exchange balance + price.
     if pf.pos_base:
@@ -298,11 +311,50 @@ def _reconcile_live(broker: Broker, pf: Portfolio, settings: Settings, stats_by_
             pf.pos_quantity = real_qty
         else:
             # Position no longer on the exchange — treat as cash only.
-            pf.pos_base = None
-            pf.pos_product_id = None
-            pf.pos_quantity = 0.0
-            pf.pos_cost_basis_usd = 0.0
-            pf.pos_mark_price = 0.0
+            _clear_tracked(pf)
+
+    untracked = sorted(
+        ((base, qty * stats_by_base[base].last) for base, qty in bals.items()
+         if base != "USD" and base != pf.pos_base and qty > 0 and base in stats_by_base),
+        key=lambda bv: bv[1], reverse=True,
+    )
+    untracked = [(b, v) for b, v in untracked if v >= config.UNTRACKED_MIN_USD]
+    if untracked:
+        token = ",".join(f"{b}(${v:,.0f})" for b, v in untracked)
+        log.warning("coins in the account are not tracked by the bot: %s", token)
+        notes.append(f"untracked:{token}")
+    return notes
+
+
+def _clear_tracked(pf: Portfolio) -> None:
+    pf.pos_base = None
+    pf.pos_product_id = None
+    pf.pos_quantity = 0.0
+    pf.pos_cost_basis_usd = 0.0
+    pf.pos_mark_price = 0.0
+    pf.pos_peak_price = 0.0
+    pf.pos_opened_at = None
+
+
+def _adopt_holding(pf: Portfolio, base: str, bals: dict, stats_by_base) -> Optional[str]:
+    """Track `base` as the position at its current market value (basis = value at
+    takeover, so P&L starts at 0); "USD" means cash only. Returns a scan note when
+    the holding can't be adopted (no balance, or no USD market for it)."""
+    if base == "USD":
+        return None
+    qty = bals.get(base, 0.0)
+    st = stats_by_base.get(base)
+    if not (qty > 0 and st and st.last > 0):
+        return f"adopt_failed:{base}"
+    pf.pos_base = base
+    pf.pos_product_id = st.product_id
+    pf.pos_quantity = qty
+    pf.pos_mark_price = st.last
+    pf.pos_peak_price = st.last
+    pf.pos_cost_basis_usd = qty * st.last
+    pf.pos_opened_at = datetime.now(timezone.utc)
+    pf.last_change_at = pf.pos_opened_at
+    return None
 
 
 def _run_audit(rec: Rec, ranked: List[CoinScore], pf: Portfolio, stats_by_base,
@@ -448,6 +500,10 @@ def _execute(broker: Broker, rec: Rec, pf: Portfolio, stats_by_base, session, se
             order_id=tr.order_id, fee_usd=tr.fee_usd, trace_id=trace_id,
         ))
         results.append(tr)
+        # The order has already executed on the exchange, so persist it now: if a
+        # later leg of the same cycle fails, run_once rolls back whatever is still
+        # uncommitted and would otherwise erase a trade that really happened.
+        session.commit()
 
     if rec.action == "ENTER" and rec.to_base in stats_by_base:
         s = stats_by_base[rec.to_base]
@@ -504,7 +560,9 @@ def _rotate_cheapest(broker, pf, sell_stat, buy_stat, settings, record) -> None:
     realized_to = broker.convert_commit(quote)
     if not realized_to or realized_to <= 0:
         # Uncertain outcome: do NOT also place orders (avoid double execution).
-        # Next live cycle reconciles from real balances and retries if needed.
+        # The next live cycle re-syncs cash and the tracked position from real
+        # balances and flags a coin it isn't tracking (scan note "untracked:");
+        # the operator can adopt it with Reconcile on the dashboard.
         log.warning("convert commit unconfirmed; skipping rotation this cycle")
         return
 

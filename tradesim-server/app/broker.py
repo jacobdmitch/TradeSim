@@ -48,6 +48,15 @@ class BrokerError(Exception):
     pass
 
 
+class OrderUnconfirmed(BrokerError):
+    """An order was accepted by Coinbase but its fill could not be read back.
+    It may well have executed, so the caller must not assume it did not."""
+
+    def __init__(self, order_id: str, detail):
+        super().__init__(f"Order {order_id} accepted but not confirmed: {detail}")
+        self.order_id = order_id
+
+
 class Broker:
     def __init__(self, dry_run: bool, fee_rate: float = config.FEE_RATE):
         self.dry_run = dry_run
@@ -269,11 +278,22 @@ class Broker:
             raise BrokerError(f"Coinbase order accepted but no order_id returned: {data}")
         return oid
 
-    def _fill(self, order_id: str, attempts: int = 6, delay: float = 1.0) -> dict:
-        """Poll the order until filled; return normalized fill numbers."""
+    def _fill(self, order_id: str, attempts: int = 10, delay: float = 1.0) -> dict:
+        """Poll the order until filled; return normalized fill numbers.
+
+        The order is already live on the exchange when this runs, and Coinbase can
+        answer the lookup of a just-placed order with 404 for a moment. A failed
+        lookup is therefore retried like any other not-yet-filled poll, and raising
+        is reserved for an order that stays unconfirmed (OrderUnconfirmed)."""
         last = {}
+        lookup_error = None
         for _ in range(attempts):
-            resp = self._client.get_order(order_id=order_id)
+            try:
+                resp = self._client.get_order(order_id=order_id)
+            except Exception as e:  # noqa: BLE001 - 404 right after placement, 5xx, network
+                lookup_error = e
+                time.sleep(delay)
+                continue
             order = resp.get("order") if isinstance(resp, dict) else getattr(resp, "order", None)
             order = order or (resp if isinstance(resp, dict) else getattr(resp, "__dict__", {}))
             status = _g(order, "status")
@@ -290,7 +310,7 @@ class Broker:
             time.sleep(delay)
         if last.get("filled_size", 0) > 0:
             return last
-        raise BrokerError(f"Order {order_id} did not fill in time: {last}")
+        raise OrderUnconfirmed(order_id, last or lookup_error)
 
     # ---- Increment rounding (Coinbase requires sizes on the product grid) ----
     def _round_base(self, product_id: str, qty: float) -> str:

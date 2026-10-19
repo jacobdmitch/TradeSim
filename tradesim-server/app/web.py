@@ -2,6 +2,7 @@
 (kill switch, dry-run/live toggle, run-now). Server-rendered, no build step."""
 import json
 import math
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from string import Template
@@ -11,7 +12,8 @@ from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import config
+from . import config, market
+from .broker import Broker
 from .db import (
     AuditLog, EquitySnapshot, Portfolio, Recommendation, ScanLog, Settings, StrategyChangeLog,
     Trade, Transfer, SessionLocal, get_portfolio, get_settings, get_strategy_params, get_veto_excluded_bases,
@@ -138,8 +140,43 @@ def toggle_enabled(token: Optional[str] = Form(default=None)):
     return RedirectResponse("/", status_code=303)
 
 
+_ASSET_RE = re.compile(r"^[A-Z0-9]{1,32}$")
+
+
+def _clean_asset(value: Optional[str]) -> Optional[str]:
+    """A coin's base currency (or "USD"), upper-cased; None if it isn't one."""
+    v = (value or "").strip().upper()
+    return v if _ASSET_RE.match(v) else None
+
+
+def _live_holdings():
+    """([(base, quantity, usd_value)], usd_cash) for the live Coinbase account:
+    the coins the bot can manage (they have a USD market), largest first. Raises
+    if Coinbase can't be read."""
+    bals = Broker(dry_run=False).balances()
+    stats = {s.base: s for s in market.fetch_stats(market.fetch_usd_products())}
+    coins = sorted(
+        ((b, q, q * stats[b].last) for b, q in bals.items()
+         if b != "USD" and _ASSET_RE.match(b) and q > 0 and b in stats and q * stats[b].last >= 0.01),
+        key=lambda c: c[2], reverse=True,
+    )
+    return coins, bals.get("USD", 0.0)
+
+
+@app.post("/pick", response_class=HTMLResponse)
+def pick(kind: str = Form(...), token: Optional[str] = Form(default=None)):
+    """Dashboard with the holding picker for Go LIVE or Reconcile. Needs the
+    control token because it reads the Coinbase account."""
+    if not _authorized(token):
+        return RedirectResponse("/?err=auth", status_code=303)
+    if kind not in ("golive", "reconcile"):
+        return RedirectResponse("/", status_code=303)
+    return HTMLResponse(_dashboard_page(picker=kind))
+
+
 @app.post("/toggle/dry-run")
-def toggle_dry_run(token: Optional[str] = Form(default=None), confirm: Optional[str] = Form(default=None)):
+def toggle_dry_run(token: Optional[str] = Form(default=None), confirm: Optional[str] = Form(default=None),
+                   asset: Optional[str] = Form(default=None)):
     if not _authorized(token):
         return RedirectResponse("/?err=auth", status_code=303)
     with SessionLocal() as s:
@@ -148,11 +185,33 @@ def toggle_dry_run(token: Optional[str] = Form(default=None), confirm: Optional[
         # Going dry-run -> LIVE is the dangerous direction: require typing LIVE.
         if going_live and (confirm or "").strip().upper() != "LIVE":
             return RedirectResponse("/?err=confirm", status_code=303)
+        chosen = _clean_asset(asset)
+        if going_live and chosen is None:
+            return RedirectResponse("/?err=asset", status_code=303)
         st.dry_run = not st.dry_run
         # Re-baseline + archive the prior run so each mode starts fresh.
-        reset_for_mode_switch(s, to_live=going_live)
+        reset_for_mode_switch(s, to_live=going_live, adopt_base=chosen)
         s.commit()
     run_once(force=True)  # run a cycle now so the new baseline/state shows at once
+    return RedirectResponse("/", status_code=303)
+
+
+@app.post("/reconcile")
+def reconcile(asset: Optional[str] = Form(default=None), token: Optional[str] = Form(default=None)):
+    """LIVE only: point the bot at the holding it should manage, in place. Unlike
+    Go LIVE this keeps the baseline, deposits and history."""
+    if not _authorized(token):
+        return RedirectResponse("/?err=auth", status_code=303)
+    chosen = _clean_asset(asset)
+    with SessionLocal() as s:
+        st = get_settings(s)
+        if st.dry_run:
+            return RedirectResponse("/?err=reconcile", status_code=303)
+        if chosen is None:
+            return RedirectResponse("/?err=asset", status_code=303)
+        st.adopt_base = chosen
+        s.commit()
+    run_once(force=True)  # adopt it now so the dashboard shows the result at once
     return RedirectResponse("/", status_code=303)
 
 
@@ -196,6 +255,10 @@ def set_interval(value: int = Form(...), token: Optional[str] = Form(default=Non
 
 @app.get("/", response_class=HTMLResponse)
 def dashboard(request: Request):
+    return HTMLResponse(_dashboard_page(err=request.query_params.get("err")))
+
+
+def _dashboard_page(err: Optional[str] = None, picker: Optional[str] = None) -> str:
     with SessionLocal() as s:
         st = get_settings(s)
         pf = get_portfolio(s)
@@ -221,12 +284,9 @@ def dashboard(request: Request):
             s.query(StrategyChangeLog).order_by(StrategyChangeLog.id.desc()).limit(10).all()
         )
         deposits, withdrawn = _transfer_totals(s, since)
-        err = request.query_params.get("err")
-        return HTMLResponse(
-            _render(st, pf, rec, recs, trades, last_scan, realized, fees_total, equity, audits,
-                    veto_excluded, err, strategy_params, strategy_changes,
-                    deposits=deposits, withdrawn=withdrawn)
-        )
+        return _render(st, pf, rec, recs, trades, last_scan, realized, fees_total, equity, audits,
+                       veto_excluded, err, strategy_params, strategy_changes,
+                       deposits=deposits, withdrawn=withdrawn, picker=picker)
 
 
 # ---------- rendering ----------
@@ -298,10 +358,51 @@ def _candidate_modal(cands: list, held: Optional[str]) -> str:
     )
 
 
+def _picker_html(kind: str, token_field: str) -> str:
+    """Panel listing the Coinbase account's holdings (coins the bot can manage,
+    plus USD) so the operator picks the one the bot starts from. `kind` is
+    "golive" (fresh LIVE run, needs typing LIVE) or "reconcile" (in place)."""
+    golive = kind == "golive"
+    try:
+        coins, usd = _live_holdings()
+    except Exception as e:  # noqa: BLE001 - say why, rather than an empty panel
+        return f'<div class="banner">Could not read your Coinbase balances: {_esc(str(e)[:200])}</div>'
+    options = "".join(
+        f'<label class="opt"><input type="radio" name="asset" value="{_esc(b)}" required> '
+        f'<b>{_esc(b)}</b> <span class="muted">{q:,.6f} · ≈ ${v:,.2f}</span></label>'
+        for b, q, v in coins
+    ) + (
+        f'<label class="opt"><input type="radio" name="asset" value="USD" required> '
+        f'<b>USD</b> <span class="muted">cash only · ${usd:,.2f}</span></label>'
+    )
+    if golive:
+        title, action = "Go LIVE: choose what to start from", "/toggle/dry-run"
+        confirm = ('<input class="tok" type="text" name="confirm" placeholder="type LIVE" '
+                   'pattern="[Ll][Ii][Vv][Ee]" autocomplete="off" required>')
+        button = '<button class="warn">Go LIVE</button>'
+        help_text = (
+            "Going LIVE starts a fresh run: the return baseline becomes your USD cash plus "
+            "the holding you pick, and earlier history is hidden from the dashboard.")
+    else:
+        title, action = "Reconcile with Coinbase: choose what the bot manages", "/reconcile"
+        confirm, button = "", '<button class="go">Reconcile</button>'
+        help_text = (
+            "Moves tracking to the holding you pick at its current value. Your return "
+            "baseline, deposits and history are kept.")
+    return (
+        f'<div class="panel pick"><p class="chart-title">{title}</p>'
+        f'<form method="post" action="{action}">{token_field}{options}'
+        f'<div class="acts">{confirm}{button}<a class="muted small" href="/">Cancel</a></div></form>'
+        f'<p class="muted small">{help_text} The bot manages one position with its normal '
+        "strategy, so it may sell your pick on a rotation or exit. Anything else in the "
+        "account is left untouched and unmanaged.</p></div>"
+    )
+
+
 def _render(st: Settings, pf: Portfolio, rec, recs, trades, last_scan, realized, fees_total,
             equity, audits, veto_excluded: Optional[dict] = None, err: Optional[str] = None,
             strategy_params=None, strategy_changes=None,
-            deposits: float = 0.0, withdrawn: float = 0.0) -> str:
+            deposits: float = 0.0, withdrawn: float = 0.0, picker: Optional[str] = None) -> str:
     total = pf.total_value
     # Return is what the account earned: value now plus what was taken out, minus
     # everything put in, so deposits and withdrawals never read as profit or loss.
@@ -360,6 +461,8 @@ def _render(st: Settings, pf: Portfolio, rec, recs, trades, last_scan, realized,
         "confirm": "Type LIVE in the box to switch to live trading.",
         "auth": "Wrong control token.",
         "amount": "Enter a positive USD amount.",
+        "asset": "Choose a holding (or USD) to start from.",
+        "reconcile": "Reconcile applies to LIVE mode only.",
     }
     err_banner = (
         f'<div class="banner">{_esc(err_messages[err])}</div>'
@@ -368,16 +471,20 @@ def _render(st: Settings, pf: Portfolio, rec, recs, trades, last_scan, realized,
 
     if st.dry_run:
         dry_run_form = (
-            f'<form class="inline" method="post" action="/toggle/dry-run">{token_field}'
-            f'<input class="tok" type="text" name="confirm" placeholder="type LIVE" '
-            f'autocomplete="off" required>'
+            f'<form class="inline" method="post" action="/pick">{token_field}'
+            f'<input type="hidden" name="kind" value="golive">'
             f'<button class="warn">Go LIVE</button></form>'
         )
     else:
         dry_run_form = (
             f'<form class="inline" method="post" action="/toggle/dry-run">{token_field}'
             f'<button class="ghost">Back to DRY-RUN</button></form>'
+            f'<form class="inline" method="post" action="/pick">{token_field}'
+            f'<input type="hidden" name="kind" value="reconcile">'
+            f'<button class="ghost">Reconcile with Coinbase</button></form>'
         )
+    # The picker only applies to the switch the current mode offers.
+    picker_panel = _picker_html(picker, token_field) if picker and (picker == "golive") == st.dry_run else ""
 
     # Latest recommendation, with an animated edge meter.
     if rec:
@@ -412,6 +519,7 @@ def _render(st: Settings, pf: Portfolio, rec, recs, trades, last_scan, realized,
     ) or "<li class='muted'>None yet.</li>"
 
     note = (last_scan.note or "") if last_scan else ""
+    untracked = re.search(r"untracked:(\S+)", note)
     pending = "awaiting_confirmation" in note
     regime_unfav = "regime=unfavorable" in note
     regime_chip = (
@@ -440,6 +548,7 @@ def _render(st: Settings, pf: Portfolio, rec, recs, trades, last_scan, realized,
             f"<p class='muted small'>Last scan {_ago(last_scan.ts)} · {count_html}"
             + (f" · {regime_chip}" if regime_chip else "")
             + (" · <span class='pending'>awaiting 2nd-scan confirmation</span>" if pending else "")
+            + (f" · <span class='pending'>Untracked on Coinbase: {_esc(untracked.group(1))}</span>" if untracked else "")
             + (f" · <span class='err'>error: {_esc(last_scan.error)}</span>" if last_scan.error else "")
             + "</p>" + cand_modal
         )
@@ -565,6 +674,7 @@ def _render(st: Settings, pf: Portfolio, rec, recs, trades, last_scan, realized,
         "holding_detail": holding_detail,
         "realized": f"{realized:+,.2f}",
         "err_banner": err_banner,
+        "picker_panel": picker_panel,
         "dry_run_form": dry_run_form,
         "token_field": token_field,
         "enabled_btn_class": "warn" if st.enabled else "go",
@@ -710,6 +820,9 @@ _PAGE = """<!doctype html>
   .xfer { margin:0 0 20px; }
   .xfer summary { cursor:pointer; color:var(--muted); font-size:13px; }
   .xfer form { flex-wrap:wrap; margin-top:10px; }
+  .pick { margin:0 0 20px; }
+  .pick .opt { display:flex; gap:10px; align-items:center; padding:10px 0; border-bottom:1px solid var(--line); cursor:pointer; }
+  .pick .acts { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-top:14px; }
 
   .rec { padding:16px; border-radius:14px; background:var(--panel2); border-left:4px solid var(--teal);
     box-shadow:0 8px 20px rgba(0,0,0,.2); }
@@ -827,6 +940,7 @@ _PAGE = """<!doctype html>
   </div>
 
   $err_banner
+  $picker_panel
   <div class="controls">
     <form class="inline" method="post" action="/toggle/enabled">$token_field
       <button class="$enabled_btn_class">$enabled_btn_label</button></form>

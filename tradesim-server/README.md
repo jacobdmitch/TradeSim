@@ -45,6 +45,7 @@ tradesim-server/
     improve.py        # self-improvement loop: backtest, decide, log, apply
     web.py            # FastAPI dashboard
     static/           # web app icons + favicon (Add to Home Screen)
+  tests/              # pytest suite (order confirmation, reconcile, dashboard routes)
 ```
 
 ## Safety model
@@ -63,8 +64,10 @@ tradesim-server/
    trading OFF, which also reverts to DRY-RUN) re-baselines and clears the
    dashboard to the new run (prior trades/recs/equity are kept in the DB but
    hidden), then runs one cycle immediately so the new state shows at once:
-   - **→ LIVE:** the next cycle adopts your real Coinbase balances and holdings
-     as the starting point, with return % and P&L measured from there.
+   - **→ LIVE:** **Go LIVE** lists what your Coinbase account holds (each coin the
+     bot can trade, plus USD) and you pick the holding to start from. The next
+     cycle adopts your real balances with that pick as the starting position, and
+     return % and P&L are measured from there. See "Reconciling with Coinbase".
    - **→ DRY-RUN (incl. trading OFF):** snapshots the current account value as
      the new baseline and paper-trades forward from the holdings on hand.
 
@@ -104,7 +107,8 @@ DRY-RUN ↔ LIVE starts them over along with the rest of the dashboard.
 4. Open the dashboard URL. It will already be tracking your seeded $23.17 DIMO
    position in **DRY-RUN**. Let it run a few days and confirm the paper results
    look sane.
-5. When ready: dashboard → **Turn trading ON**, then **Switch to LIVE**.
+5. When ready: dashboard → **Turn trading ON**, then **Go LIVE** and pick the
+   holding to start from.
 
 ## Run locally
 
@@ -117,6 +121,46 @@ cp .env.example .env          # leave DATABASE_URL blank to use local SQLite
 python run_cycle.py           # one dry-run cycle
 uvicorn app.web:app --reload  # dashboard at http://127.0.0.1:8000
 ```
+
+Tests (they use a throwaway SQLite file and never contact Coinbase):
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest tests
+```
+
+## Reconciling with Coinbase
+
+In LIVE the bot trusts the real Coinbase account, not its own bookkeeping: every
+cycle it re-reads your balances and overwrites cash and the tracked position with
+them. It manages **one position at a time**, so you tell it which holding that is.
+
+- **Go LIVE** (from DRY-RUN): lists your holdings with their USD value (only coins
+  with a USD market the bot can trade, plus USD cash). Pick one, type `LIVE`, and
+  the next cycle starts from it. Picking **USD** starts from cash only; coins you
+  don't pick stay in the account untouched. This starts a fresh run: the return
+  baseline becomes USD plus the picked holding, and earlier history is hidden.
+- **Reconcile with Coinbase** (in LIVE): the same picker, but in place. It moves
+  tracking to the holding you pick at its current value and keeps your baseline,
+  deposits and history. Use it when the bot's books and the account disagree (for
+  example after an order was placed but its fill could not be confirmed).
+- **Untracked coins:** if the account holds a coin worth at least
+  `UNTRACKED_MIN_USD` (default $1) that the bot isn't tracking, the dashboard's
+  scan line shows `Untracked on Coinbase: ...` and the scan note records
+  `untracked:...`. The bot never adopts such a coin on its own, because it could be
+  a holding you meant to keep.
+
+The adopted holding's cost basis is its market value at the moment of adoption, so
+its P&L starts at zero from there. Once adopted, it is managed like any other
+position (trailing stop, rotation, exit), so the bot may sell it.
+
+**Order confirmation.** After placing a market order the bot reads the order back
+to get the fill. Coinbase can briefly answer 404 for an order it has just accepted,
+so a failed lookup is retried for about ten seconds. Each executed leg of a trade
+is saved as soon as it fills, so a later failure in the same cycle can't erase it.
+An order that still can't be confirmed fails the cycle with `OrderUnconfirmed`
+(the cron exits non-zero); the next cycle then flags any coin it bought as
+untracked, and Reconcile adopts it.
 
 ## Tuning
 
@@ -186,8 +230,9 @@ cheaper of two paths per trade:
 It fetches a live Convert quote, compares how much value each path retains, and
 uses Convert only if it strictly keeps more and the commit confirms — otherwise
 it falls back to the two legs. If a Convert is chosen but can't be confirmed, the
-cycle does nothing and the next cycle reconciles from real balances (no double
-execution). DRY-RUN always uses the two-leg model.
+cycle does nothing (no double execution); the next cycle re-syncs cash and the
+tracked position from real balances and flags the coin it didn't track, which
+Reconcile can adopt. DRY-RUN always uses the two-leg model.
 
 ## Reality check
 

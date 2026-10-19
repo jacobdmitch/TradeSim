@@ -35,6 +35,10 @@ def _b(name: str, default: bool) -> bool:
 SEED_BASE = "DIMO"
 SEED_PRODUCT_ID = "DIMO-USD"
 
+# A coin in the Coinbase account that the bot isn't tracking is flagged on the
+# dashboard once it is worth at least this much (dust below it is ignored).
+UNTRACKED_MIN_USD = _f("UNTRACKED_MIN_USD", 1.0)
+
 # ---- Market / execution constants (match the iOS app) ----
 QUOTE_CURRENCY = "USD"
 GRANULARITY = 3600          # 1-hour candles
