@@ -53,6 +53,10 @@ class Settings(Base):
     prev_rec_sig: Mapped[Optional[str]] = mapped_column(String(96), nullable=True)  # 2-scan confirm
     min_hold_hours: Mapped[int] = mapped_column(Integer, default=6)      # min hold before rotating
     veto_exclusion_hours: Mapped[int] = mapped_column(Integer, default=24)  # hours a token is banned after 2 consecutive vetos
+    # One-shot request for the next LIVE reconcile: the base currency of the
+    # holding the bot should manage ("USD" = cash only). Set by "Go LIVE" and
+    # "Reconcile", consumed (cleared) by engine._reconcile_live.
+    adopt_base: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     # Dashboard only shows history (trades/recs/equity/scans/audits) at or after
     # this time; advanced on each deliberate DRY-RUN<->LIVE switch to start fresh.
     history_since: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -209,6 +213,7 @@ def _run_migrations() -> None:
             ("min_hold_hours", "INTEGER DEFAULT 6"),
             ("history_since", "TIMESTAMP"),
             ("veto_exclusion_hours", "INTEGER DEFAULT 24"),
+            ("adopt_base", "VARCHAR(32)"),
         ],
         "portfolio": [
             ("pos_opened_at", "TIMESTAMP"),
@@ -355,13 +360,14 @@ def get_veto_excluded_bases(session, exclusion_hours: int) -> dict:
     return result
 
 
-def reset_for_mode_switch(session, *, to_live: bool) -> None:
+def reset_for_mode_switch(session, *, to_live: bool, adopt_base: Optional[str] = None) -> None:
     """Re-baseline the account when the operator deliberately switches between
     DRY-RUN and LIVE, and hide the prior run's history from the dashboard.
 
     - Going LIVE: drop the modeled seed so the next live cycle adopts the real
-      Coinbase balances and holdings fresh (return baseline and P&L reset to the
-      real account; see engine._reconcile_live).
+      Coinbase balances fresh (return baseline and P&L reset to the real account;
+      see engine._reconcile_live). `adopt_base` is the operator's pick of the
+      holding to start from: a coin's base currency, or "USD" for cash only.
     - Going DRY-RUN: snapshot the current account value as the new baseline and
       keep paper-trading forward from the holdings on hand (unrealized P&L and
       the hold timer restart from here).
@@ -373,6 +379,7 @@ def reset_for_mode_switch(session, *, to_live: bool) -> None:
     now = _now()
     st.history_since = now
     st.prev_rec_sig = None  # don't carry a pending 2-scan confirmation across modes
+    st.adopt_base = adopt_base if to_live else None
     if to_live:
         st.seeded = False   # next live cycle re-adopts the real account
     else:
