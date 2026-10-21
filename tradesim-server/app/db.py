@@ -285,6 +285,84 @@ def _fix_live_realized_pnl() -> None:
                      fixed, before, after)
 
 
+_BACKFILL_FEE_RATE = 0.009  # fee on every other recorded LIVE fill (fee_usd / filled value)
+
+
+def _backfill_unrecorded_trades() -> None:
+    """Record LIVE trades that executed on Coinbase but never reached the trades
+    table: the order lookup answered 404, the cycle failed, and the session rolled
+    back the legs already made.
+
+      - 2026-10-19 02:16 UTC  INJ -> ZEC rotation, both legs
+      - 2026-10-20 19:15 UTC  VVV exit
+
+    Net cash and quantities are exact: they are the stored USD balances before and
+    after, and quantities already on record. Price and fee are estimates, using the
+    0.9% charged on every other recorded fill. The INJ price is the 02:16 candle's
+    open (the sell ran 23s in); it implies a ZEC buy at $1,181.84, inside that
+    minute's ZEC range. Rows are tagged with an "est:backfill-" order id.
+
+    The ZEC exit that followed was stored against the market value the position was
+    adopted at, so its P&L is restated against what the ZEC really cost.
+
+    Each incident is applied once (its marker order id is the guard) and only where
+    the trades around it are the ones recorded in this database."""
+    r = _BACKFILL_FEE_RATE
+    with SessionLocal() as s:
+        def recorded(prefix):
+            return s.query(Trade).filter(Trade.order_id.like(prefix + "%")).first()
+
+        def done(marker):
+            return s.query(Trade).filter(Trade.order_id == marker).first() is not None
+
+        def sold_after(base, ts):
+            return s.query(Trade).filter(Trade.base == base, Trade.action == "SELL", Trade.ts > ts).first()
+
+        def failed_cycle_trace(start, end):
+            scan = (s.query(ScanLog).filter(ScanLog.error.isnot(None), ScanLog.ts >= start, ScanLog.ts < end)
+                    .order_by(ScanLog.id).first())
+            return scan.trace_id if scan else None
+
+        def utc(*args):
+            return datetime(*args, tzinfo=timezone.utc)
+
+        added = 0
+        inj_buy, zec_sell = recorded("89992203"), recorded("b1a0f4db")
+        if inj_buy and zec_sell and not sold_after("INJ", inj_buy.ts) and not done("est:backfill-2026-10-19-zec-buy"):
+            trace = failed_cycle_trace(utc(2026, 10, 19, 2, 16), utc(2026, 10, 19, 2, 17))
+            inj_value = inj_buy.quantity * 8.538
+            inj_net = inj_value * (1 - r)
+            zec_cost = inj_net + 0.027533692844097284 - 0.013691504000897284  # USD before - after both legs
+            zec_value = zec_cost / (1 + r)
+            s.add_all([
+                Trade(ts=utc(2026, 10, 19, 2, 16, 24), action="SELL", base="INJ", price=8.538,
+                      quantity=inj_buy.quantity, cash_flow=inj_net, realized_pnl=inj_net + inj_buy.cash_flow,
+                      fee_usd=inj_value * r, mode="LIVE", order_id="est:backfill-2026-10-19-inj-sell",
+                      trace_id=trace),
+                Trade(ts=utc(2026, 10, 19, 2, 16, 25), action="BUY", base="ZEC",
+                      price=zec_value / zec_sell.quantity, quantity=zec_sell.quantity, cash_flow=-zec_cost,
+                      realized_pnl=None, fee_usd=zec_cost - zec_value, mode="LIVE",
+                      order_id="est:backfill-2026-10-19-zec-buy", trace_id=trace),
+            ])
+            if abs((zec_sell.realized_pnl or 0.0) - (-1.2826300453627795)) < 1e-6:
+                zec_sell.realized_pnl = zec_sell.cash_flow - zec_cost
+            added += 2
+
+        vvv_buy, pump_buy = recorded("c9bd9c35"), recorded("b686589b")
+        if vvv_buy and pump_buy and not sold_after("VVV", vvv_buy.ts) and not done("est:backfill-2026-10-20-vvv-sell"):
+            net = 123.2667897908381 - 0.6966232384380973  # USD after - before
+            value = net / (1 - r)
+            s.add(Trade(ts=utc(2026, 10, 20, 19, 15, 23), action="SELL", base="VVV", price=value / vvv_buy.quantity,
+                        quantity=vvv_buy.quantity, cash_flow=net, realized_pnl=net + vvv_buy.cash_flow,
+                        fee_usd=value - net, mode="LIVE", order_id="est:backfill-2026-10-20-vvv-sell",
+                        trace_id=failed_cycle_trace(utc(2026, 10, 20, 19, 15), utc(2026, 10, 20, 19, 16))))
+            added += 1
+
+        if added:
+            s.commit()
+            log.info("backfilled %d unrecorded LIVE trade(s)", added)
+
+
 def init_db() -> None:
     """Create tables and seed the singleton control rows if missing."""
     Base.metadata.create_all(ENGINE)
@@ -293,6 +371,10 @@ def init_db() -> None:
         _fix_live_realized_pnl()
     except Exception:  # never block trading startup on a bookkeeping fix
         log.exception("realized P&L migration failed; will retry next start")
+    try:
+        _backfill_unrecorded_trades()
+    except Exception:  # never block trading startup on a bookkeeping fix
+        log.exception("trade backfill failed; will retry next start")
     with SessionLocal() as s:
         if s.get(Settings, 1) is None:
             s.add(Settings(

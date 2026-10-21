@@ -88,7 +88,7 @@ def api_state():
         pf = get_portfolio(s)
         since = st.history_since
         rec = _since(s.query(Recommendation), Recommendation.ts, since).order_by(Recommendation.id.desc()).first()
-        trades = _since(s.query(Trade), Trade.ts, since).order_by(Trade.id.desc()).limit(50).all()
+        trades = _since(s.query(Trade), Trade.ts, since).order_by(Trade.ts.desc(), Trade.id.desc()).limit(50).all()
         realized = sum(t.realized_pnl or 0.0 for t in _since(s.query(Trade), Trade.ts, since).all())
         deposits, withdrawn = _transfer_totals(s, since)
         deposited = st.starting_balance + deposits
@@ -265,7 +265,7 @@ def _dashboard_page(err: Optional[str] = None, picker: Optional[str] = None) -> 
         since = st.history_since  # only show the current run's history
         rec = _since(s.query(Recommendation), Recommendation.ts, since).order_by(Recommendation.id.desc()).first()
         recs = _since(s.query(Recommendation), Recommendation.ts, since).order_by(Recommendation.id.desc()).limit(10).all()
-        trades = _since(s.query(Trade), Trade.ts, since).order_by(Trade.id.desc()).limit(25).all()
+        trades = _since(s.query(Trade), Trade.ts, since).order_by(Trade.ts.desc(), Trade.id.desc()).limit(25).all()
         last_scan = _since(s.query(ScanLog), ScanLog.ts, since).order_by(ScanLog.id.desc()).first()
         all_trades = _since(s.query(Trade), Trade.ts, since).all()
         realized = sum(t.realized_pnl or 0.0 for t in all_trades)
