@@ -181,6 +181,19 @@ TRAILING_STOP_REFERENCE_ATR_PCT = _f("TRAILING_STOP_REFERENCE_ATR_PCT", 3.0)
 TRAILING_STOP_FLOOR_PCT = _f("TRAILING_STOP_FLOOR_PCT", 3.0)
 TRAILING_STOP_CEILING_PCT = _f("TRAILING_STOP_CEILING_PCT", 15.0)
 
+# ---- Fast stop guard ----
+# The trading cycle runs every 15 minutes and used to be the only thing that checked the
+# trailing stop, so a fast drop could fall far past it before the next look. The guard
+# (app/guard.py) re-checks the held coin against the live ticker this often.
+GUARD_ENABLED = _b("GUARD_ENABLED", True)
+GUARD_INTERVAL_SECONDS = _f("GUARD_INTERVAL_SECONDS", 20.0)
+GUARD_RETRY_SECONDS = _f("GUARD_RETRY_SECONDS", 120.0)   # pause after a failed guard sale
+
+# Entry filter: coins whose 24h high-low range is wider than this % of price are not entry
+# candidates (a held coin is still scored). A volume floor cannot do this job: pumps inflate
+# volume, so the coins that blow up are exactly the high-volume ones. 0 disables the filter.
+MAX_24H_RANGE_PCT = _f("MAX_24H_RANGE_PCT", 40.0)
+
 COINBASE_API_KEY = os.environ.get("COINBASE_API_KEY", "").strip()
 # Allow the PEM to be supplied with escaped newlines.
 COINBASE_API_SECRET = os.environ.get("COINBASE_API_SECRET", "").replace("\\n", "\n").strip()

@@ -258,6 +258,7 @@ class Broker:
         pf.pos_cost_basis_usd = 0.0
         pf.pos_mark_price = 0.0
         pf.pos_peak_price = 0.0
+        pf.pos_stop_pct = 0.0
         pf.pos_opened_at = None
         pf.last_change_at = datetime.now(timezone.utc)
 

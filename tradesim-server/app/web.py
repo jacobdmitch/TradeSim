@@ -12,7 +12,7 @@ from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import config, market
+from . import config, guard, market
 from .broker import Broker
 from .db import (
     AuditLog, EquitySnapshot, Portfolio, Recommendation, ScanLog, Settings, StrategyChangeLog,
@@ -53,6 +53,8 @@ def manifest():
 @app.on_event("startup")
 def _startup():
     init_db()
+    if config.GUARD_ENABLED:
+        guard.start()
 
 
 def _authorized(token: Optional[str]) -> bool:
@@ -358,6 +360,22 @@ def _candidate_modal(cands: list, held: Optional[str]) -> str:
     )
 
 
+def _guard_chip(st: Settings) -> str:
+    """Whether the fast stop guard is alive (LIVE only): it stamps guard_checked_at about
+    once a minute, so a stale or missing stamp means nothing is watching the stop."""
+    if st.dry_run:
+        return ""
+    if not config.GUARD_ENABLED:
+        return "<span class='err'>stop guard off</span>"
+    at = st.guard_checked_at
+    if at is None:
+        return "<span class='err'>stop guard: not running</span>"
+    if at.tzinfo is None:
+        at = at.replace(tzinfo=timezone.utc)
+    stale = (datetime.now(timezone.utc) - at).total_seconds() > 180
+    return f"<span class='{'err' if stale else 'muted'}'>stop guard checked {_ago(at)}</span>"
+
+
 def _picker_html(kind: str, token_field: str) -> str:
     """Panel listing the Coinbase account's holdings (coins the bot can manage,
     plus USD) so the operator picks the one the bot starts from. `kind` is
@@ -428,16 +446,20 @@ def _render(st: Settings, pf: Portfolio, rec, recs, trades, last_scan, realized,
             age_h = (datetime.now(timezone.utc) - opened).total_seconds() / 3600
             locked = " 🔒" if age_h < min_h else ""
             held_line = f"<span>held {age_h:.1f}h · min {min_h}h{locked}</span>"
+        stop_line = ""
+        if (pf.pos_peak_price or 0) > 0 and (pf.pos_stop_pct or 0) > 0:
+            stop_line = (f"<span>stop ${pf.pos_peak_price * (1 - pf.pos_stop_pct / 100):,.6f} "
+                         f"(-{pf.pos_stop_pct:.1f}% from peak ${pf.pos_peak_price:,.6f})</span>")
         holding_detail = (
             f"<div class='hdetail'>"
             f"<span>price ${cur_price:,.6f}</span>"
             f"<span>entry ${entry_price:,.6f}</span>"
             f"<span class='{upnl_class}'>unrealized ${upnl:+,.2f} ({upnl_pct:+.1f}%)</span>"
-            f"{held_line}"
+            f"{held_line}{stop_line}{_guard_chip(st)}"
             f"</div>"
         )
     else:
-        holding_detail = "<div class='hdetail'><span>in USD cash</span></div>"
+        holding_detail = f"<div class='hdetail'><span>in USD cash</span>{_guard_chip(st)}</div>"
 
     mode_badge = (
         '<span class="badge live">● LIVE</span>' if not st.dry_run

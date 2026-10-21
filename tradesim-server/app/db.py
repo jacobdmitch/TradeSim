@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
+import time
+from contextlib import contextmanager
 from typing import Optional
 from datetime import datetime, timezone
 
 from sqlalchemy import (
-    Boolean, DateTime, Float, Integer, String, Text, create_engine,
+    Boolean, DateTime, Float, Integer, String, Text, create_engine, text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
@@ -57,6 +60,9 @@ class Settings(Base):
     # holding the bot should manage ("USD" = cash only). Set by "Go LIVE" and
     # "Reconcile", consumed (cleared) by engine._reconcile_live.
     adopt_base: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    # Last pass of the fast stop guard (app/guard.py), stamped about once a minute so the
+    # dashboard can show whether it is alive.
+    guard_checked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     # Dashboard only shows history (trades/recs/equity/scans/audits) at or after
     # this time; advanced on each deliberate DRY-RUN<->LIVE switch to start fresh.
     history_since: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -74,6 +80,9 @@ class Portfolio(Base):
     pos_cost_basis_usd: Mapped[float] = mapped_column(Float, default=0.0)
     pos_mark_price: Mapped[float] = mapped_column(Float, default=0.0)
     pos_peak_price: Mapped[float] = mapped_column(Float, default=0.0)  # high-water mark since entry (trailing stop)
+    # Trailing-stop distance (%) for the held coin, volatility-scaled and refreshed every cycle;
+    # the fast guard uses it between cycles. 0 = not set yet.
+    pos_stop_pct: Mapped[float] = mapped_column(Float, default=0.0)
     pos_opened_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     last_change_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)  # any position change
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
@@ -214,11 +223,13 @@ def _run_migrations() -> None:
             ("history_since", "TIMESTAMP"),
             ("veto_exclusion_hours", "INTEGER DEFAULT 24"),
             ("adopt_base", "VARCHAR(32)"),
+            ("guard_checked_at", "TIMESTAMP"),
         ],
         "portfolio": [
             ("pos_opened_at", "TIMESTAMP"),
             ("last_change_at", "TIMESTAMP"),
             ("pos_peak_price", "FLOAT DEFAULT 0"),
+            ("pos_stop_pct", "FLOAT DEFAULT 0"),
         ],
         "trades": [
             ("fee_usd", "FLOAT DEFAULT 0"),
@@ -399,6 +410,48 @@ def init_db() -> None:
                 trailing_stop_pct=config.TRAILING_STOP_PCT,
             ))
         s.commit()
+
+
+_LOCK_KEY = 7_413_001          # arbitrary app-wide advisory-lock id: "one trader at a time"
+_local_lock = threading.Lock()
+
+
+@contextmanager
+def trading_lock(timeout: float = 0.0):
+    """Serialize everything that trades: the 15-minute cycle (cron process, or a dashboard
+    button) and the fast stop guard (dashboard process). Yields True if the caller holds the
+    lock, False if it could not get it within `timeout` seconds; it is released on exit.
+
+    Postgres: a session-level advisory lock, so it works across processes and the server
+    releases it if a holder dies. Other databases (local SQLite): a per-process lock."""
+    deadline = time.monotonic() + timeout
+    if ENGINE.dialect.name != "postgresql":
+        got = _local_lock.acquire(blocking=False)
+        while not got and time.monotonic() < deadline:
+            time.sleep(0.05)
+            got = _local_lock.acquire(blocking=False)
+        try:
+            yield got
+        finally:
+            if got:
+                _local_lock.release()
+        return
+    conn = ENGINE.connect()
+    got = False
+    try:
+        while True:
+            got = bool(conn.execute(text("SELECT pg_try_advisory_lock(:k)"), {"k": _LOCK_KEY}).scalar())
+            conn.commit()  # the lock belongs to the session, not the transaction
+            if got or time.monotonic() >= deadline:
+                break
+            time.sleep(1.0)
+        yield got
+    finally:
+        try:
+            if got:
+                conn.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": _LOCK_KEY})
+        finally:
+            conn.close()
 
 
 def get_settings(session) -> Settings:

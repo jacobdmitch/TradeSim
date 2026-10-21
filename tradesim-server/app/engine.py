@@ -15,8 +15,8 @@ from typing import List, Optional
 from . import auditor, config, market
 from .broker import Broker, TradeResult
 from .db import (
-    AuditLog, EquitySnapshot, Portfolio, Recommendation, ScanLog, Settings, SessionLocal,
-    get_portfolio, get_settings, get_strategy_params, get_veto_excluded_bases, init_db,
+    AuditLog, EquitySnapshot, Portfolio, Recommendation, ScanLog, Settings, SessionLocal, Trade,
+    get_portfolio, get_settings, get_strategy_params, get_veto_excluded_bases, init_db, trading_lock,
 )
 from .predictor import (
     CoinScore, Predictor, Recommendation as Rec, select_candidates, trade_economics,
@@ -35,7 +35,19 @@ class CycleResult:
     error: Optional[str] = None
 
 
+LOCK_WAIT_SECONDS = 90.0   # how long a cycle waits for a sale by the fast guard to finish
+
+
 def run_once(force: bool = False) -> CycleResult:
+    """One trading cycle, serialized with the fast stop guard (see db.trading_lock)."""
+    with trading_lock(timeout=LOCK_WAIT_SECONDS) as got:
+        if not got:
+            return CycleResult(False, None, [], 0, "error",
+                               f"another trading task still held the trading lock after {LOCK_WAIT_SECONDS:.0f}s")
+        return _run_once(force)
+
+
+def _run_once(force: bool) -> CycleResult:
     init_db()
     session = SessionLocal()
     # One id for every row (scan/recommendation/audit/trade/equity) this cycle
@@ -226,6 +238,7 @@ def run_once(force: bool = False) -> CycleResult:
 
         # Remember this scan's recommendation for next time's confirmation check.
         settings.prev_rec_sig = sig
+        _refresh_stop_pct(pf, ranked, trailing_stop_pct)
 
         note = " ".join(note_parts)
         # Persist the ranked candidates so the dashboard can show what the scan
@@ -333,6 +346,7 @@ def _clear_tracked(pf: Portfolio) -> None:
     pf.pos_cost_basis_usd = 0.0
     pf.pos_mark_price = 0.0
     pf.pos_peak_price = 0.0
+    pf.pos_stop_pct = 0.0
     pf.pos_opened_at = None
 
 
@@ -430,6 +444,16 @@ def _scaled_trailing_stop_pct(base_pct: float, atr_pct: float) -> float:
     return min(max(scaled, config.TRAILING_STOP_FLOOR_PCT), config.TRAILING_STOP_CEILING_PCT)
 
 
+def _refresh_stop_pct(pf: Portfolio, ranked: List[CoinScore], base_pct: float) -> None:
+    """Store the held coin's volatility-scaled stop distance so the fast guard
+    (app/guard.py) applies the same stop between cycles."""
+    if not pf.has_position:
+        pf.pos_stop_pct = 0.0
+        return
+    held = next((s for s in ranked if s.base == pf.pos_base), None)
+    pf.pos_stop_pct = _scaled_trailing_stop_pct(base_pct, held.atr_pct if held else 0.0)
+
+
 def _regime_ok(ranked: List[CoinScore]) -> bool:
     """Favorable market: BTC trending up AND at least REGIME_BREADTH_MIN of the
     analyzed universe trending up. When false, the engine forces a move to cash."""
@@ -486,6 +510,14 @@ def _execution_allowed(settings: Settings, pf: Portfolio, rec: Rec) -> tuple[boo
     return True, "ok"
 
 
+def _trade_row(tr: TradeResult, trace_id: Optional[str]) -> Trade:
+    return Trade(
+        action=tr.action, base=tr.base, price=tr.price, quantity=tr.quantity,
+        cash_flow=tr.cash_flow, realized_pnl=tr.realized_pnl, mode=tr.mode,
+        order_id=tr.order_id, fee_usd=tr.fee_usd, trace_id=trace_id,
+    )
+
+
 def _execute(broker: Broker, rec: Rec, pf: Portfolio, stats_by_base, session, settings,
             trace_id: Optional[str] = None) -> List[TradeResult]:
     results: List[TradeResult] = []
@@ -493,12 +525,7 @@ def _execute(broker: Broker, rec: Rec, pf: Portfolio, stats_by_base, session, se
     def record(tr: Optional[TradeResult]):
         if tr is None:
             return
-        from .db import Trade
-        session.add(Trade(
-            action=tr.action, base=tr.base, price=tr.price, quantity=tr.quantity,
-            cash_flow=tr.cash_flow, realized_pnl=tr.realized_pnl, mode=tr.mode,
-            order_id=tr.order_id, fee_usd=tr.fee_usd, trace_id=trace_id,
-        ))
+        session.add(_trade_row(tr, trace_id))
         results.append(tr)
         # The order has already executed on the exchange, so persist it now: if a
         # later leg of the same cycle fails, run_once rolls back whatever is still
