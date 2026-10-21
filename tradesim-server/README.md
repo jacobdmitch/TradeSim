@@ -155,12 +155,29 @@ its P&L starts at zero from there. Once adopted, it is managed like any other
 position (trailing stop, rotation, exit), so the bot may sell it.
 
 **Order confirmation.** After placing a market order the bot reads the order back
-to get the fill. Coinbase can briefly answer 404 for an order it has just accepted,
-so a failed lookup is retried for about ten seconds. Each executed leg of a trade
-is saved as soon as it fills, so a later failure in the same cycle can't erase it.
-An order that still can't be confirmed fails the cycle with `OrderUnconfirmed`
-(the cron exits non-zero); the next cycle then flags any coin it bought as
-untracked, and Reconcile adopts it.
+to get the fill. Coinbase can answer 404 for an order it has just accepted (it has
+done so for more than ten seconds), so confirmation falls back in three steps:
+
+1. Retry the order lookup for about ten seconds.
+2. Read the order's fills instead.
+3. Compare the account balances with the ones read just before the order. If they
+   show the order executed, the trade is booked from the balance change. Quantity
+   and net cash are exact; price and fee are estimated with `FEE_RATE`, and the
+   trade's order id is prefixed `est:`. If the balances show nothing happened, the
+   order is not booked.
+
+Each executed leg of a trade is saved as soon as it is booked, so a later failure
+in the same cycle can't erase it. An order that none of the three steps can
+confirm fails the cycle with `OrderUnconfirmed` (the cron exits non-zero); the next
+cycle then flags any coin it bought as untracked, and Reconcile adopts it.
+
+**Estimated trades.** A one-off startup migration (`db._backfill_unrecorded_trades`)
+records the three trades that executed but were never saved before this fallback
+existed (the 2026-10-19 INJ to ZEC rotation and the 2026-10-20 VVV exit), and
+restates the ZEC exit against what the ZEC really cost. Cash and quantities are
+exact; price and fee are estimated at the 0.9% seen on every other recorded fill.
+Their order ids start with `est:backfill-`. Replace them with the figures from
+Coinbase's fills export if you want them exact.
 
 ## Tuning
 

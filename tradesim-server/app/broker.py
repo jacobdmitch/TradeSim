@@ -11,6 +11,7 @@ directly comparable to what live would have done.
 """
 from __future__ import annotations
 
+import logging
 import time
 import uuid
 from dataclasses import dataclass
@@ -20,6 +21,8 @@ from typing import Optional
 
 from . import config
 from .db import Portfolio
+
+log = logging.getLogger("tradesim.broker")
 
 
 @dataclass
@@ -193,8 +196,10 @@ class Broker:
         # LIVE: market buy using available USD as quote_size.
         spend = pf.cash
         quote_size = self._round_quote(product_id, spend)
+        before = self.balances()  # read first: if this fails, no order has been placed
         order_id = self._place_market(product_id, side="BUY", quote_size=quote_size)
-        fill = self._fill(order_id)
+        fill = self._confirmed_fill(order_id, "BUY", base, before)
+        order_id = f"est:{order_id}" if fill.get("estimated") else order_id
         qty = fill["filled_size"]
         # Coinbase's filled_value excludes the fee, so the cash paid is value + fees.
         # Basis, cash left and the trade's cash flow all use the cash paid, so realized
@@ -233,8 +238,10 @@ class Broker:
 
         # LIVE: market sell the full base size.
         base_size = self._round_base(product_id, qty)
+        before = self.balances()  # read first: if this fails, no order has been placed
         order_id = self._place_market(product_id, side="SELL", base_size=base_size)
-        fill = self._fill(order_id)
+        fill = self._confirmed_fill(order_id, "SELL", base, before)
+        order_id = f"est:{order_id}" if fill.get("estimated") else order_id
         proceeds = fill["filled_value"] - fill["fees"]
         avg_price = fill["avg_price"] or price
         pnl = proceeds - cost_basis
@@ -310,7 +317,69 @@ class Broker:
             time.sleep(delay)
         if last.get("filled_size", 0) > 0:
             return last
+        from_fills = self._fills_for(order_id)
+        if from_fills:
+            return from_fills
         raise OrderUnconfirmed(order_id, last or lookup_error)
+
+    def _fills_for(self, order_id: str) -> Optional[dict]:
+        """Fill numbers rebuilt from the fills endpoint, for when the order lookup
+        itself keeps failing. None if no fills can be read."""
+        try:
+            resp = self._client.get_fills(order_ids=[order_id])
+        except Exception:  # noqa: BLE001
+            return None
+        fills = _g(resp, "fills") or (resp.get("fills") if isinstance(resp, dict) else None) or []
+        size = value = fees = 0.0
+        for f in fills:
+            price = _f(_g(f, "price"))
+            base_size = _f(_g(f, "size"))
+            if _g(f, "size_in_quote") and price > 0:
+                base_size /= price  # this fill's size is in USD, not base units
+            size += base_size
+            value += base_size * price
+            fees += _f(_g(f, "commission"))
+        if size <= 0:
+            return None
+        return {"status": "FILLED", "filled_size": size, "filled_value": value,
+                "fees": fees, "avg_price": value / size}
+
+    def _confirmed_fill(self, order_id: str, side: str, base: str, before: dict) -> dict:
+        """The fill of an order that has just been placed: its real numbers when
+        Coinbase will give them, otherwise settled from the account balances."""
+        try:
+            return self._fill(order_id)
+        except OrderUnconfirmed as e:
+            return self._settle_from_balances(e, side, base, before)
+
+    def _settle_from_balances(self, unconfirmed: OrderUnconfirmed, side: str, base: str,
+                              before: dict) -> dict:
+        """Last resort when neither the order nor its fills can be looked up: the
+        account shows whether the order executed. Quantity and net cash are exact
+        (they are the balance change); only their split into price and fee is an
+        estimate, made with fee_rate. Re-raises when the balances don't show the
+        order, so an order that did not execute is never booked."""
+        try:
+            now = self.balances()
+        except Exception:  # noqa: BLE001
+            raise unconfirmed
+        d_usd = now.get("USD", 0.0) - before.get("USD", 0.0)
+        d_base = now.get(base, 0.0) - before.get(base, 0.0)
+        if side == "SELL":
+            net, qty = d_usd, -d_base          # cash received after the fee, base given up
+            executed = before.get(base, 0.0) > 0 and qty >= 0.99 * before[base] and net > 0
+            value = net / (1 - self.fee_rate)
+        else:
+            net, qty = -d_usd, d_base          # cash paid including the fee, base received
+            executed = qty > 0 and net > 0
+            value = net / (1 + self.fee_rate)
+        if not executed:
+            raise unconfirmed
+        log.warning("order %s could not be looked up; booked from the balance change "
+                    "(%s %.8f %s, net cash %.2f, fee estimated)",
+                    unconfirmed.order_id, side, qty, base, net)
+        return {"status": "SETTLED", "filled_size": qty, "filled_value": value,
+                "fees": abs(net - value), "avg_price": value / qty, "estimated": True}
 
     # ---- Increment rounding (Coinbase requires sizes on the product grid) ----
     def _round_base(self, product_id: str, qty: float) -> str:

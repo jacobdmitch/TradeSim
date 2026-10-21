@@ -143,6 +143,7 @@ def test_run_once_adopts_the_pick_and_reports_the_rest(session, monkeypatch):
 def test_adopt_base_column_is_added_to_an_existing_database(session):
     with db.ENGINE.begin() as conn:
         conn.execute(text("ALTER TABLE settings DROP COLUMN adopt_base"))
+    db.ENGINE.dispose()  # SQLite connections keep a stale schema view after DDL
     assert "adopt_base" not in {c["name"] for c in inspect(db.ENGINE).get_columns("settings")}
     db._run_migrations()
     assert "adopt_base" in {c["name"] for c in inspect(db.ENGINE).get_columns("settings")}
