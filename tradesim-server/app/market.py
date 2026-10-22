@@ -47,6 +47,11 @@ class MarketStat:
     def volume_usd(self) -> float:
         return self.volume * self.last
 
+    @property
+    def range_pct(self) -> float:
+        """24h high-low spread as a % of the last price."""
+        return (self.high - self.low) / self.last * 100 if self.last > 0 else 0.0
+
 
 def fetch_usd_products() -> List[Product]:
     """All online, tradable USD products (stablecoins and deprecated tokens filtered out)."""
@@ -144,6 +149,17 @@ def fetch_spot(product_id: str) -> Optional[float]:
         r = _SESSION.get(f"{BROKERAGE_SPOT}/{product_id}/spot", timeout=_TIMEOUT)
         r.raise_for_status()
         return float(r.json()["data"]["amount"])
+    except Exception:
+        return None
+
+
+def fetch_last_price(product_id: str) -> Optional[float]:
+    """Last trade price from the exchange ticker, or None if it can't be read."""
+    try:
+        r = _SESSION.get(f"{EXCHANGE}/products/{product_id}/ticker", timeout=5)
+        r.raise_for_status()
+        price = float(r.json()["price"])
+        return price if price > 0 else None
     except Exception:
         return None
 

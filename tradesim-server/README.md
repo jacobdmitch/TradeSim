@@ -19,6 +19,8 @@ money until you explicitly flip both switches from the dashboard.
   rotation thresholds against recent market history and, if a nearby variant
   clearly beats them, nudges them (bounded step, logged, never touches the
   kill switch or dry-run/live). See "Tracing & self-improvement" below.
+- **Fast stop guard** (`app/guard.py`) — a thread inside the web service that re-checks
+  the held coin's trailing stop every ~20 seconds between cycles. See "Fast stop guard".
 - **Web service** (`app/web.py`) — dashboard: portfolio, P&L, trade log,
   recommendation history, and the controls (kill switch, dry-run/live, run-now).
   Tap the candidate count under the recommendation to see the ranked shortlist
@@ -60,7 +62,10 @@ tradesim-server/
 3. **Balance floor.** `BALANCE_FLOOR_USD` halts new entries/rotations once total
    value drops to/below it (a protective exit-to-cash is still allowed).
 4. **Acts only on a changed recommendation**, same as the app — it won't churn.
-5. **Switching modes starts a fresh run.** Flipping DRY-RUN ↔ LIVE (or turning
+5. **Fast stop guard and entry filter.** The trailing stop is also checked every ~20s
+   between cycles, and coins with an extreme 24h range are not entry candidates. See
+   "Fast stop guard" and "Entry filter".
+6. **Switching modes starts a fresh run.** Flipping DRY-RUN ↔ LIVE (or turning
    trading OFF, which also reverts to DRY-RUN) re-baselines and clears the
    dashboard to the new run (prior trades/recs/equity are kept in the DB but
    hidden), then runs one cycle immediately so the new state shows at once:
@@ -178,6 +183,50 @@ restates the ZEC exit against what the ZEC really cost. Cash and quantities are
 exact; price and fee are estimated at the 0.9% seen on every other recorded fill.
 Their order ids start with `est:backfill-`. Replace them with the figures from
 Coinbase's fills export if you want them exact.
+
+## Fast stop guard
+
+The 15-minute cycle used to be the only thing that checked the trailing stop. On
+2026-10-21 DOOD was bought at 14:31 UTC, was 2% down at the 15:30 cycle, and was sold
+at the 15:45 cycle 26% lower; replayed on 1-minute candles its 15% stop was first
+touched at 15:36. The guard closes most of that blind spot.
+
+- **What it does.** Every `GUARD_INTERVAL_SECONDS` (default 20) it reads the live
+  exchange ticker for the held coin and applies the same trailing stop as the cycle:
+  the peak since entry, and the volatility-scaled distance each cycle stores in
+  `portfolio.pos_stop_pct` (the baseline `trailing_stop_pct` until a cycle has stored
+  one). When the stop is hit it market-sells at once, records the trade and an EXIT
+  recommendation reading "Fast stop guard: ...", and the next cycle re-syncs from the
+  account.
+- **When.** LIVE with trading ON only. It needs two consecutive passes under the stop
+  to sell, and a new high must hold for two consecutive passes before it raises the
+  peak, so one stray print on a thin book can neither trigger a sale nor tighten the
+  stop. After a failed sale it backs off for `GUARD_RETRY_SECONDS` (default 120).
+- **Where.** A thread in the dashboard web service: always on, already holds the
+  Coinbase key, no extra Render service. It and the trading cycle (cron process, or a
+  dashboard button) take the same Postgres advisory lock (`db.trading_lock`), so they
+  never trade at the same moment. The guard skips a pass while a cycle runs; a cycle
+  waits up to 90s for a guard sale to finish.
+- **Visible.** The Holding card shows the stop price and "stop guard checked Ns ago",
+  in red if the guard is off, has never run, or has been silent for over 3 minutes.
+- **Limits.** It narrows the blind spot from 15 minutes to about 20-40 seconds; it does
+  not remove it. A market sell into a fast-falling thin book can still fill below the
+  stop, and if the web service is down or restarting the guard is too. Set
+  `GUARD_ENABLED=false` to turn it off. The backtest does not model it.
+
+## Entry filter
+
+Coins whose 24h high-low range is wider than `MAX_24H_RANGE_PCT` (default 40% of price)
+are not entry candidates; a coin you already hold is still scored so the bot can hold or
+exit it. `0` disables the filter. DOOD was 80% wide at entry (+185% in 24h); across the
+68 coins with at least $1M of daily volume the median range is 7% and the 40% cap
+excludes 4.
+
+A higher `MIN_LIQUIDITY_USD` was considered and does not help: in `anti_chasing` mode
+the candidates are the 12 highest-volume coins, and a pump inflates volume, so the coins
+that blow up are exactly the ones that rank high. DOOD had $6.5M of daily volume, the
+same as VVV, PUMP and STRK, so a floor that excluded it would exclude most of the
+universe. The backtest does not model this filter.
 
 ## Tuning
 

@@ -318,7 +318,8 @@ class Predictor:
 def select_candidates(stats: List[MarketStat], rotation: RotationConfig,
                       min_liquidity_usd: float, position_base: Optional[str],
                       seed_base: str, excluded_bases: Optional[set] = None) -> List[MarketStat]:
-    """Liquid coins, plus the held coin, the seed, and BTC (for the regime check).
+    """Liquid coins whose 24h range is not extreme (config.MAX_24H_RANGE_PCT), plus the
+    held coin, the seed, and BTC (for the regime check).
 
     In anti_chasing mode candidates are sorted by volume (not 24h gain) to avoid
     pre-biasing the pool toward coins that already pumped.
@@ -328,7 +329,12 @@ def select_candidates(stats: List[MarketStat], rotation: RotationConfig,
     engine can decide to HOLD or EXIT even if the token is veto-excluded.
     seed_base is force-included only if not excluded."""
     excluded = excluded_bases or set()
-    liquid = [s for s in stats if s.volume_usd >= min_liquidity_usd and s.base not in excluded]
+    cap = config.MAX_24H_RANGE_PCT
+
+    def tradable(s: MarketStat) -> bool:
+        return s.volume_usd >= min_liquidity_usd and (cap <= 0 or s.range_pct <= cap)
+
+    liquid = [s for s in stats if tradable(s) and s.base not in excluded]
     if config.SELECTION_MODE == "anti_chasing":
         liquid.sort(key=lambda s: s.volume_usd, reverse=True)
     else:
@@ -340,7 +346,7 @@ def select_candidates(stats: List[MarketStat], rotation: RotationConfig,
     # Force-include seed_base and BTC only when they clear the liquidity bar — prevents
     # entering a thin-market position just because it's the seed token. BTC nearly
     # always passes; seed tokens that lack real Coinbase liquidity are excluded.
-    liquid_bases = {s.base for s in stats if s.volume_usd >= min_liquidity_usd}
+    liquid_bases = {s.base for s in stats if tradable(s)}
     for b in (seed_base, "BTC"):
         if b and b not in excluded and b in liquid_bases:
             force_bases.append(b)

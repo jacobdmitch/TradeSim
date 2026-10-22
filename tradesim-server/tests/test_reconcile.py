@@ -133,6 +133,7 @@ def test_run_once_adopts_the_pick_and_reports_the_rest(session, monkeypatch):
 
     with db.SessionLocal() as fresh:
         assert get_portfolio(fresh).pos_base == "ZEC"
+        assert get_portfolio(fresh).pos_stop_pct == pytest.approx(5.0)   # stored for the fast guard
         eq = fresh.query(db.EquitySnapshot).order_by(db.EquitySnapshot.id.desc()).first()
         assert (eq.holding, round(eq.total_value, 2)) == ("ZEC", 133.01)
         scan = fresh.query(db.ScanLog).order_by(db.ScanLog.id.desc()).first()
@@ -140,13 +141,18 @@ def test_run_once_adopts_the_pick_and_reports_the_rest(session, monkeypatch):
         assert get_settings(fresh).adopt_base is None
 
 
-def test_adopt_base_column_is_added_to_an_existing_database(session):
+def test_new_columns_are_added_to_an_existing_database(session):
+    added = {"settings": ["adopt_base", "guard_checked_at"], "portfolio": ["pos_stop_pct"]}
     with db.ENGINE.begin() as conn:
-        conn.execute(text("ALTER TABLE settings DROP COLUMN adopt_base"))
+        for table, cols in added.items():
+            for col in cols:
+                conn.execute(text(f"ALTER TABLE {table} DROP COLUMN {col}"))
     db.ENGINE.dispose()  # SQLite connections keep a stale schema view after DDL
-    assert "adopt_base" not in {c["name"] for c in inspect(db.ENGINE).get_columns("settings")}
+    for table, cols in added.items():
+        assert not set(cols) & {c["name"] for c in inspect(db.ENGINE).get_columns(table)}
     db._run_migrations()
-    assert "adopt_base" in {c["name"] for c in inspect(db.ENGINE).get_columns("settings")}
+    for table, cols in added.items():
+        assert set(cols) <= {c["name"] for c in inspect(db.ENGINE).get_columns(table)}
 
 
 def test_mode_switch_records_the_pick_and_clears_it_going_dry(session):
